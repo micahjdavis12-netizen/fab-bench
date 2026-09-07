@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#eceae4" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Fab Bench" />
+    <meta
+      name="description"
+      content="Mobile-first triangle and measurement calculator for fabrication and shop layout."
+    />
+    <title>Fab Bench</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon-192.png" type="image/png" />
+    <link rel="apple-touch-icon" href="./icons/icon-180.png" sizes="180x180" />
+    <link rel="stylesheet" href="./css/app.css?v=15" />
+    <style>
+      .saved {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        align-items: center !important;
+        column-gap: 12px !important;
+      }
+      .saved-info {
+        flex: 1 !important;
+        min-width: 0 !important;
+      }
+      .saved-actions {
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        margin-left: auto !important;
+        flex-shrink: 0 !important;
+      }
+    </style>
+    <script>
+      (function () {
+        var build = "15";
+        var local = location.hostname === "127.0.0.1" || location.hostname === "localhost";
+        var seen = localStorage.getItem("fab-bench-build") === build;
+        if (seen && !local) return;
+        localStorage.setItem("fab-bench-build", build);
+        var done = function () {
+          if (!seen) location.reload();
+        };
+        if (!("serviceWorker" in navigator)) return;
+        Promise.all([
+          navigator.serviceWorker.getRegistrations().then(function (regs) {
+            return Promise.all(regs.map(function (r) { return r.unregister(); }));
+          }),
+          caches.keys().then(function (keys) {
+            return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+          }),
+        ]).then(done).catch(done);
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="top">
+        <div class="brand">
+          <h1>Fab Bench</h1>
+          <p>Triangle</p>
+        </div>
+        <div class="top-actions">
+          <label class="precision">
+            <span>Round</span>
+            <select id="precision" aria-label="Round fractions to">
+              <option value="16">1/16 in</option>
+              <option value="32">1/32 in</option>
+              <option value="64">1/64 in</option>
+            </select>
+          </label>
+          <button class="glass compact" type="button" id="install" aria-label="Install status">
+            Install
+          </button>
+        </div>
+      </header>
+
+      <p class="status-bar" id="status" role="status" aria-live="polite">
+        0 of 3 inputs · Need three measurements
+      </p>
+
+      <section class="workspace" id="workspace" aria-label="Triangle diagram">
+        <svg id="tri" viewBox="0 0 400 420" role="img" aria-labelledby="diagram-msg"></svg>
+        <p class="diagram-msg" id="diagram-msg" role="status"></p>
+        <div class="controls" id="controls"></div>
+        <div class="ssa glass" id="ssa" hidden>
+          <span>Two triangles possible. Pick one.</span>
+          <div class="ssa-btns">
+            <button type="button" data-sol="0" aria-pressed="true">1</button>
+            <button type="button" data-sol="1" aria-pressed="false">2</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="dock">
+        <button class="glass float" type="button" id="example">Load example</button>
+        <button class="glass float" type="button" id="clear">Clear triangle</button>
+      </div>
+
+      <div class="panels">
+        <section class="panel" aria-labelledby="bank-title">
+          <div class="panel-head">
+            <h2 id="bank-title">Saved</h2>
+            <button class="text-btn" type="button" id="clear-bank">Clear</button>
+          </div>
+          <p class="empty" id="bank-empty">Tap + on a solved side or angle to save it.</p>
+          <ul class="bank" id="bank"></ul>
+        </section>
+
+        <section class="panel" aria-labelledby="calc-title">
+          <div class="panel-head">
+            <h2 id="calc-title">Combine</h2>
+            <button class="text-btn" type="button" id="clear-calc">Clear</button>
+          </div>
+          <p class="empty" id="calc-empty">Tap Add on a saved measurement to start a running total.</p>
+          <ol class="calc-list" id="calc-list"></ol>
+          <div class="result" id="calc-result" aria-live="polite"></div>
+        </section>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <dialog class="sheet" id="save-dialog" aria-labelledby="save-title">
+      <form id="save-form">
+        <h2 id="save-title">Save this measurement</h2>
+        <p class="save-meta" id="save-meta"></p>
+        <label>
+          Name it for the shop
+          <input id="save-name" name="name" maxlength="80" required autocomplete="off" placeholder="Roof diagonal" />
+        </label>
+        <div class="sheet-actions">
+          <button class="ghost" id="save-cancel" type="button">Cancel</button>
+          <button class="solid" id="save-confirm" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="./js/app.js?v=15"></script>
+  </body>
+</html>
