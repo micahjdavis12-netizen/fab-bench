@@ -59,7 +59,7 @@ const state = {
   bank: stored.bank,
   calc: stored.calc,
   saveTarget: null,
-  lastShape: { a: 1, b: 1, c: 1 },
+  lastShape: { a: 9, b: 12, c: 15 },
 };
 
 precisionEl.value = String(state.precision);
@@ -188,7 +188,7 @@ function refresh() {
   });
 
   renderControls(ready);
-  draw(solved || state.lastShape, !ready);
+  draw(solved || state.lastShape, false);
   renderBank();
   renderCalc();
 }
@@ -294,7 +294,7 @@ function edgeToward(cx, cy, w, h, ax, ay) {
   return { x: cx + dx * t, y: cy + dy * t };
 }
 
-function draw(shape, hideTriangle) {
+function draw(shape) {
   const { w, h, pad } = viewSize();
   const layout = layoutTriangle(shape.a, shape.b, shape.c, w, h, pad);
   const { A, B, C } = layout;
@@ -313,9 +313,7 @@ function draw(shape, hideTriangle) {
     return `<line class="leader" x1="${anchor.x}" y1="${anchor.y}" x2="${end.x}" y2="${end.y}" />`;
   }).join("");
 
-  svg.innerHTML = hideTriangle
-    ? ""
-    : `
+  svg.innerHTML = `
       <path class="triangle-fill" d="M ${A.x} ${A.y} L ${B.x} ${B.y} L ${C.x} ${C.y} Z" />
       ${leaders}
       <circle class="vertex" cx="${A.x}" cy="${A.y}" r="4" />
@@ -519,7 +517,7 @@ document.getElementById("clear").addEventListener("click", () => {
   KEYS.forEach((key) => parseKey(key, ""));
   state.solutions = [];
   state.solutionIndex = 0;
-  state.lastShape = { a: 1, b: 1, c: 1 };
+  state.lastShape = { a: 9, b: 12, c: 15 };
   refresh();
 });
 
@@ -585,7 +583,7 @@ async function setupPwa() {
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js?v=17");
+    const reg = await navigator.serviceWorker.register("./sw.js?v=18");
     const ready = await navigator.serviceWorker.ready;
     if (ready.active || reg.active) installBtn.textContent = "Ready";
     navigator.serviceWorker.addEventListener("message", (event) => {
