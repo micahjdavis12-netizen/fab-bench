@@ -59,7 +59,7 @@ const state = {
   bank: stored.bank,
   calc: stored.calc,
   saveTarget: null,
-  lastShape: { a: 9, b: 12, c: 15 },
+  lastShape: { a: 1, b: 1, c: 1 },
 };
 
 precisionEl.value = String(state.precision);
@@ -188,7 +188,7 @@ function refresh() {
   });
 
   renderControls(ready);
-  draw(solved || state.lastShape, error && !ready);
+  draw(solved || state.lastShape, !ready);
   renderBank();
   renderCalc();
 }
@@ -314,7 +314,7 @@ function draw(shape, hideTriangle) {
   }).join("");
 
   svg.innerHTML = hideTriangle
-    ? leaders
+    ? ""
     : `
       <path class="triangle-fill" d="M ${A.x} ${A.y} L ${B.x} ${B.y} L ${C.x} ${C.y} Z" />
       ${leaders}
@@ -514,18 +514,12 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-document.getElementById("example").addEventListener("click", () => {
-  state.raw = { a: "9", b: "12", c: "15", A: "", B: "", C: "" };
-  KEYS.forEach((key) => parseKey(key, state.raw[key]));
-  state.solutionIndex = 0;
-  refresh();
-});
-
 document.getElementById("clear").addEventListener("click", () => {
   state.raw = { a: "", b: "", c: "", A: "", B: "", C: "" };
   KEYS.forEach((key) => parseKey(key, ""));
   state.solutions = [];
   state.solutionIndex = 0;
+  state.lastShape = { a: 1, b: 1, c: 1 };
   refresh();
 });
 
@@ -591,7 +585,7 @@ async function setupPwa() {
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js?v=16");
+    const reg = await navigator.serviceWorker.register("./sw.js?v=17");
     const ready = await navigator.serviceWorker.ready;
     if (ready.active || reg.active) installBtn.textContent = "Ready";
     navigator.serviceWorker.addEventListener("message", (event) => {
