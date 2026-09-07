@@ -19,7 +19,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon-192.png" type="image/png" />
     <link rel="apple-touch-icon" href="./icons/icon-180.png" sizes="180x180" />
-    <link rel="stylesheet" href="./css/app.css?v=15" />
+    <link rel="stylesheet" href="./css/app.css?v=16" />
     <style>
       .saved {
         display: grid !important;
@@ -41,7 +41,7 @@
     </style>
     <script>
       (function () {
-        var build = "15";
+        var build = "16";
         var local = location.hostname === "127.0.0.1" || location.hostname === "localhost";
         var seen = localStorage.getItem("fab-bench-build") === build;
         if (seen && !local) return;
@@ -144,6 +144,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./js/app.js?v=15"></script>
+    <script type="module" src="./js/app.js?v=16"></script>
   </body>
 </html>

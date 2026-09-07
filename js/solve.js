@@ -317,18 +317,32 @@ export function boxesOverlap(a, b, gap = 8) {
   );
 }
 
+export function unit(x, y) {
+  const len = Math.hypot(x, y) || 1;
+  return { x: x / len, y: y / len };
+}
+
+export function sideOutDir(p, q, center) {
+  const mx = (p.x + q.x) / 2;
+  const my = (p.y + q.y) / 2;
+  let n = unit(p.y - q.y, q.x - p.x);
+  if (n.x * (center.x - mx) + n.y * (center.y - my) > 0) {
+    n = { x: -n.x, y: -n.y };
+  }
+  return n;
+}
+
+export function vertexOutDir(p, center) {
+  return unit(p.x - center.x, p.y - center.y);
+}
+
+export function reachToBoxEdge(dir, box) {
+  return 1 / Math.max(Math.abs(dir.x) / (box.w / 2), Math.abs(dir.y) / (box.h / 2), 0.001);
+}
+
 export function controlAnchors(pts) {
   const { A, B, C } = pts;
-  const mid = centroid(A, B, C);
   return {
-    desired: {
-      a: offsetOutward(B, C, mid, 36),
-      b: offsetOutward(A, C, mid, 36),
-      c: offsetOutward(A, B, mid, 36),
-      A: outwardPoint(A, mid, 40),
-      B: outwardPoint(B, mid, 40),
-      C: outwardPoint(C, mid, 40),
-    },
     anchors: {
       a: midpoint(B, C),
       b: midpoint(A, C),
@@ -340,13 +354,25 @@ export function controlAnchors(pts) {
   };
 }
 
-const SIDE_KEYS_PLACE = new Set(["a", "b", "c"]);
-
-export function placeAttachedChips(pts, box, bounds, gap = 12) {
-  const { desired, anchors } = controlAnchors(pts);
+export function placeAttachedChips(pts, box, bounds, gap = 14) {
   const mid = centroid(pts.A, pts.B, pts.C);
-  const order = ["A", "B", "C", "a", "b", "c"];
+  const { anchors } = controlAnchors(pts);
+  const dirs = {
+    a: sideOutDir(pts.B, pts.C, mid),
+    b: sideOutDir(pts.A, pts.C, mid),
+    c: sideOutDir(pts.A, pts.B, mid),
+    A: vertexOutDir(pts.A, mid),
+    B: vertexOutDir(pts.B, mid),
+    C: vertexOutDir(pts.C, mid),
+  };
+  const order = ["C", "c", "A", "B", "a", "b"];
   const placed = {};
+  const inset = 8;
+
+  const clamp = (cx, cy) => ({
+    cx: Math.min(bounds.w - box.w / 2 - inset, Math.max(box.w / 2 + inset, cx)),
+    cy: Math.min(bounds.h - box.h / 2 - inset, Math.max(box.h / 2 + inset, cy)),
+  });
 
   const asRect = (p) => ({
     x: p.cx - box.w / 2,
@@ -355,84 +381,49 @@ export function placeAttachedChips(pts, box, bounds, gap = 12) {
     h: box.h,
   });
 
-  const clamp = (cx, cy) => ({
-    cx: Math.min(bounds.w - box.w / 2 - 4, Math.max(box.w / 2 + 4, cx)),
-    cy: Math.min(bounds.h - box.h / 2 - 4, Math.max(box.h / 2 + 4, cy)),
-  });
-
-  const overlapCount = (cx, cy, skip) => {
-    const mine = asRect({ cx, cy });
-    let n = 0;
-    for (const key of order) {
-      if (key === skip || !placed[key]) continue;
-      if (boxesOverlap(mine, asRect(placed[key]), gap)) n += 1;
-    }
-    return n;
-  };
-
   for (const key of order) {
     const anchor = anchors[key];
-    const pref = desired[key];
-    let ox = pref.x - mid.x;
-    let oy = pref.y - mid.y;
-    const len = Math.hypot(ox, oy) || 1;
-    ox /= len;
-    oy /= len;
-
-    let best = null;
-    let bestScore = Infinity;
-    const minDot = SIDE_KEYS_PLACE.has(key) ? 0.05 : 0.2;
-
-    for (let r = 26; r <= 160; r += 5) {
-      for (let deg = -140; deg <= 140; deg += 10) {
-        const rad = (deg * Math.PI) / 180;
-        const c = Math.cos(rad);
-        const s = Math.sin(rad);
-        const dx = ox * c - oy * s;
-        const dy = ox * s + oy * c;
-        if (dx * ox + dy * oy < minDot) continue;
-        const raw = clamp(anchor.x + dx * r, anchor.y + dy * r);
-        const hits = overlapCount(raw.cx, raw.cy, key);
-        const score = hits * 20000 + r * 3 + Math.abs(deg) + Math.hypot(raw.cx - pref.x, raw.cy - pref.y);
-        if (score < bestScore) {
-          bestScore = score;
-          best = { cx: raw.cx, cy: raw.cy, ax: anchor.x, ay: anchor.y };
-        }
-      }
-      if (bestScore < 20000) break;
-    }
-
-    placed[key] = best || {
-      cx: clamp(pref.x, pref.y).cx,
-      cy: clamp(pref.x, pref.y).cy,
+    const dir = dirs[key];
+    const dist = reachToBoxEdge(dir, box) + gap;
+    const raw = clamp(anchor.x + dir.x * dist, anchor.y + dir.y * dist);
+    placed[key] = {
+      cx: raw.cx,
+      cy: raw.cy,
       ax: anchor.x,
       ay: anchor.y,
+      dx: dir.x,
+      dy: dir.y,
     };
   }
 
-  for (let iter = 0; iter < 60; iter += 1) {
+  for (let iter = 0; iter < 80; iter += 1) {
     let moved = false;
     for (let i = 0; i < order.length; i += 1) {
       for (let j = i + 1; j < order.length; j += 1) {
         const a = placed[order[i]];
         const b = placed[order[j]];
-        const ra = asRect(a);
-        const rb = asRect(b);
-        if (!boxesOverlap(ra, rb, gap)) continue;
+        if (!boxesOverlap(asRect(a), asRect(b), 10)) continue;
         const oxp = a.cx - b.cx;
         const oyp = a.cy - b.cy;
         const d = Math.hypot(oxp, oyp) || 0.01;
-        const overlapX = (box.w + gap - Math.abs(oxp)) / 2;
-        const overlapY = (box.h + gap - Math.abs(oyp)) / 2;
-        const push = Math.max(overlapX, overlapY, 6);
-        const nx = oxp / d;
-        const ny = oyp / d;
-        const ac = clamp(a.cx + nx * push, a.cy + ny * push);
-        const bc = clamp(b.cx - nx * push, b.cy - ny * push);
-        a.cx = ac.cx;
-        a.cy = ac.cy;
-        b.cx = bc.cx;
-        b.cy = bc.cy;
+        const overlapX = (box.w + 10 - Math.abs(oxp)) / 2;
+        const overlapY = (box.h + 10 - Math.abs(oyp)) / 2;
+        const push = Math.max(overlapX, overlapY, 4) / 2;
+        const alongA = clamp(a.cx + a.dx * push * 1.4, a.cy + a.dy * push * 1.4);
+        const alongB = clamp(b.cx + b.dx * push * 1.4, b.cy + b.dy * push * 1.4);
+        if (Math.hypot(alongA.cx - alongB.cx, alongA.cy - alongB.cy) > d) {
+          a.cx = alongA.cx;
+          a.cy = alongA.cy;
+          b.cx = alongB.cx;
+          b.cy = alongB.cy;
+        } else {
+          const ac = clamp(a.cx + (oxp / d) * push, a.cy + (oyp / d) * push);
+          const bc = clamp(b.cx - (oxp / d) * push, b.cy - (oyp / d) * push);
+          a.cx = ac.cx;
+          a.cy = ac.cy;
+          b.cx = bc.cx;
+          b.cy = bc.cy;
+        }
         moved = true;
       }
     }

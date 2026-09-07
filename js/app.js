@@ -7,6 +7,7 @@ import {
   parseLength,
 } from "./parse.js";
 import {
+  controlAnchors,
   evaluateCalculation,
   layoutTriangle,
   placeAttachedChips,
@@ -16,7 +17,6 @@ import { loadState, saveState } from "./storage.js";
 
 const KEYS = ["a", "b", "c", "A", "B", "C"];
 const SIDE_KEYS = ["a", "b", "c"];
-const CHIP = { a: "a", b: "b", c: "c", A: "∠A", B: "∠B", C: "∠C" };
 const LABELS = {
   a: "Side a",
   b: "Side b",
@@ -207,64 +207,8 @@ function svgToWorkspace(x, y) {
 function placeControls(layout) {
   const { w, h } = viewSize();
   return {
-    boxes: placeAttachedChips(layout, { w: 100, h: 56 }, { w, h, pad: 4 }, 14),
+    boxes: placeAttachedChips(layout, { w: 124, h: 58 }, { w, h, pad: 4 }, 16),
   };
-}
-
-function unstackDom() {
-  const wr = workspace.getBoundingClientRect();
-  const nodes = KEYS.map((key) => ({
-    key,
-    el: controlsEl.querySelector(`[data-key="${key}"]`),
-  }));
-  const gap = 12;
-  for (let iter = 0; iter < 50; iter += 1) {
-    let moved = false;
-    const rects = nodes.map((n) => {
-      const r = n.el.getBoundingClientRect();
-      return {
-        ...n,
-        x: r.left - wr.left,
-        y: r.top - wr.top,
-        w: r.width,
-        h: r.height,
-        cx: r.left - wr.left + r.width / 2,
-        cy: r.top - wr.top + r.height / 2,
-      };
-    });
-    for (let i = 0; i < rects.length; i += 1) {
-      for (let j = i + 1; j < rects.length; j += 1) {
-        const a = rects[i];
-        const b = rects[j];
-        if (
-          a.x + a.w + gap <= b.x ||
-          b.x + b.w + gap <= a.x ||
-          a.y + a.h + gap <= b.y ||
-          b.y + b.h + gap <= a.y
-        ) {
-          continue;
-        }
-        const dx = a.cx - b.cx;
-        const dy = a.cy - b.cy;
-        const dist = Math.hypot(dx, dy) || 0.01;
-        const overlapX = (a.w + b.w) / 2 + gap - Math.abs(dx);
-        const overlapY = (a.h + b.h) / 2 + gap - Math.abs(dy);
-        const push = Math.max(overlapX, overlapY, 8) / 2;
-        const nx = dx / dist;
-        const ny = dy / dist;
-        const acx = Math.min(wr.width - a.w / 2 - 4, Math.max(a.w / 2 + 4, a.cx + nx * push));
-        const acy = Math.min(wr.height - a.h / 2 - 4, Math.max(a.h / 2 + 4, a.cy + ny * push));
-        const bcx = Math.min(wr.width - b.w / 2 - 4, Math.max(b.w / 2 + 4, b.cx - nx * push));
-        const bcy = Math.min(wr.height - b.h / 2 - 4, Math.max(b.h / 2 + 4, b.cy - ny * push));
-        a.el.style.left = `${acx}px`;
-        a.el.style.top = `${acy}px`;
-        b.el.style.left = `${bcx}px`;
-        b.el.style.top = `${bcy}px`;
-        moved = true;
-      }
-    }
-    if (!moved) break;
-  }
 }
 
 function workspaceToSvg(x, y) {
@@ -281,7 +225,7 @@ function viewSize() {
   const w = Math.max(320, workspace.clientWidth);
   const h = Math.max(320, workspace.clientHeight);
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  return { w, h, pad: Math.max(80, Math.min(w, h) * 0.18) };
+  return { w, h, pad: Math.max(96, Math.min(w, h) * 0.26) };
 }
 
 function renderControls(ready) {
@@ -289,19 +233,21 @@ function renderControls(ready) {
   const { w, h, pad } = viewSize();
   const layout = layoutTriangle(shape.a, shape.b, shape.c, w, h, pad);
   const placed = placeControls(layout);
-  if (!controlsEl.dataset.ready) {
+  if (controlsEl.dataset.ready !== "2") {
     controlsEl.innerHTML = KEYS.map(
       (key) => `
       <div class="measure glass" data-key="${key}">
-        <label class="lab" for="in-${key}">${CHIP[key]}</label>
-        <input id="in-${key}" data-key="${key}" autocomplete="off" spellcheck="false"
-          inputmode="${SIDE_KEYS.includes(key) ? "text" : "decimal"}"
-          aria-label="${LABELS[key]}" placeholder="${SIDE_KEYS.includes(key) ? "12 3/8" : "45"}"
-          title="${SIDE_KEYS.includes(key) ? "Side length. Try 12 3/8 or 250 mm." : "Angle in degrees."}" />
-        <button class="glass plus" type="button" data-save="${key}" aria-label="Save ${LABELS[key]}" title="Save ${LABELS[key]}" disabled>+</button>
+        <label class="lab" for="in-${key}">${LABELS[key]}</label>
+        <div class="measure-row">
+          <input id="in-${key}" data-key="${key}" autocomplete="off" spellcheck="false"
+            inputmode="${SIDE_KEYS.includes(key) ? "text" : "decimal"}"
+            aria-label="${LABELS[key]}" placeholder="${SIDE_KEYS.includes(key) ? "12 3/8" : "45"}"
+            title="${SIDE_KEYS.includes(key) ? "Side length. Try 12 3/8 or 250 mm." : "Angle in degrees."}" />
+          <button class="glass plus" type="button" data-save="${key}" aria-label="Save ${LABELS[key]}" title="Save ${LABELS[key]}" disabled>+</button>
+        </div>
       </div>`
     ).join("");
-    controlsEl.dataset.ready = "1";
+    controlsEl.dataset.ready = "2";
     controlsEl.querySelectorAll("input").forEach((input) => {
       input.addEventListener("focus", () => {
         input.closest(".measure").classList.add("is-on");
@@ -327,7 +273,7 @@ function renderControls(ready) {
     const pixel = svgToWorkspace(box.cx, box.cy);
     el.style.left = `${pixel.x}px`;
     el.style.top = `${pixel.y}px`;
-    el.style.width = "88px";
+    el.style.width = "124px";
     el.classList.toggle("is-user", state.source[key] === "user");
     el.classList.toggle("is-calc", state.source[key] === "calc");
     input.readOnly = state.source[key] === "calc";
@@ -335,26 +281,36 @@ function renderControls(ready) {
     const save = el.querySelector("[data-save]");
     save.disabled = !ready;
   }
-  unstackDom();
 
   state._placed = placed;
   state._layout = layout;
 }
 
+function edgeToward(cx, cy, w, h, ax, ay) {
+  const dx = ax - cx;
+  const dy = ay - cy;
+  if (!dx && !dy) return { x: cx, y: cy };
+  const t = Math.min((w / 2) / Math.abs(dx || 1e-6), (h / 2) / Math.abs(dy || 1e-6));
+  return { x: cx + dx * t, y: cy + dy * t };
+}
+
 function draw(shape, hideTriangle) {
   const { w, h, pad } = viewSize();
   const layout = layoutTriangle(shape.a, shape.b, shape.c, w, h, pad);
-  const placed = placeControls(layout);
   const { A, B, C } = layout;
+  const { anchors } = controlAnchors(layout);
+  const wr = workspace.getBoundingClientRect();
   const leaders = KEYS.map((key) => {
-    const p = placed.boxes[key];
     const el = controlsEl.querySelector(`[data-key="${key}"]`);
-    const wr = workspace.getBoundingClientRect();
+    if (!el) return "";
     const r = el.getBoundingClientRect();
-    const end = workspaceToSvg(r.left - wr.left + r.width / 2, r.top - wr.top + r.height / 2);
-    const dist = Math.hypot(end.x - p.ax, end.y - p.ay);
-    if (p.ax == null || dist < 18) return "";
-    return `<line class="leader" x1="${p.ax}" y1="${p.ay}" x2="${end.x}" y2="${end.y}" />`;
+    const cx = r.left - wr.left + r.width / 2;
+    const cy = r.top - wr.top + r.height / 2;
+    const anchor = anchors[key];
+    const attach = svgToWorkspace(anchor.x, anchor.y);
+    const edge = edgeToward(cx, cy, r.width, r.height, attach.x, attach.y);
+    const end = workspaceToSvg(edge.x, edge.y);
+    return `<line class="leader" x1="${anchor.x}" y1="${anchor.y}" x2="${end.x}" y2="${end.y}" />`;
   }).join("");
 
   svg.innerHTML = hideTriangle
@@ -362,9 +318,9 @@ function draw(shape, hideTriangle) {
     : `
       <path class="triangle-fill" d="M ${A.x} ${A.y} L ${B.x} ${B.y} L ${C.x} ${C.y} Z" />
       ${leaders}
-      <circle class="vertex" cx="${A.x}" cy="${A.y}" r="5" />
-      <circle class="vertex" cx="${B.x}" cy="${B.y}" r="5" />
-      <circle class="vertex" cx="${C.x}" cy="${C.y}" r="5" />
+      <circle class="vertex" cx="${A.x}" cy="${A.y}" r="4" />
+      <circle class="vertex" cx="${B.x}" cy="${B.y}" r="4" />
+      <circle class="vertex" cx="${C.x}" cy="${C.y}" r="4" />
     `;
 }
 
@@ -635,9 +591,9 @@ async function setupPwa() {
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js?v=15");
+    const reg = await navigator.serviceWorker.register("./sw.js?v=16");
     const ready = await navigator.serviceWorker.ready;
-    if (ready.active || reg.active) installBtn.textContent = "Offline ready";
+    if (ready.active || reg.active) installBtn.textContent = "Ready";
     navigator.serviceWorker.addEventListener("message", (event) => {
       if (event.data === "ready") installBtn.textContent = "Offline ready";
     });
