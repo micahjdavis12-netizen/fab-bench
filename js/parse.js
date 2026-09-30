@@ -202,7 +202,7 @@ export function formatFeetInches(inches, denom = 16) {
   const feet = Math.floor(abs / 12 + 1e-12);
   const rem = abs - feet * 12;
   const frac = formatInchesFraction(rem, denom);
-  if (feet === 0) return `${sign}${frac}"`;
+  if (feet === 0) return `${sign}0' ${frac}"`;
   if (Number(rem.toFixed(6)) === 0) return `${sign}${feet}' 0"`;
   return `${sign}${feet}' ${frac}"`;
 }

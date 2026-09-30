@@ -19,7 +19,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon-192.png" type="image/png" />
     <link rel="apple-touch-icon" href="./icons/icon-180.png" sizes="180x180" />
-    <link rel="stylesheet" href="./css/app.css?v=21" />
+    <link rel="stylesheet" href="./css/app.css?v=38" />
     <style>
       .saved {
         display: grid !important;
@@ -41,7 +41,7 @@
     </style>
     <script>
       (function () {
-        var build = "21";
+        var build = "38";
         var local = location.hostname === "127.0.0.1" || location.hostname === "localhost";
         var seen = localStorage.getItem("fab-bench-build") === build;
         if (seen && !local) return;
@@ -122,17 +122,17 @@
       </div>
 
       <div class="view" id="view-combine" role="tabpanel" aria-labelledby="tab-combine" hidden>
-        <p class="status-bar">Type a length or angle, or bring one over from Saved.</p>
+        <p class="status-bar">Type a length or an angle. Saved triangle values can still be added from Triangle.</p>
 
         <section class="panel" aria-labelledby="compose-title">
           <div class="panel-head">
             <h2 id="compose-title">Add a value</h2>
           </div>
-          <div class="kind-toggle" role="group" aria-label="Value type">
-            <button class="kind" type="button" data-kind="length" aria-pressed="true">Length</button>
-            <button class="kind" type="button" data-kind="angle" aria-pressed="false">Angle</button>
-          </div>
           <form class="compose" id="compose-form">
+            <div class="kind-toggle" role="group" aria-label="Value type">
+              <button class="kind" type="button" data-kind="length" aria-pressed="true">Length</button>
+              <button class="kind" type="button" data-kind="angle" aria-pressed="false">Angle</button>
+            </div>
             <label>
               Name
               <input id="compose-name" maxlength="80" autocomplete="off" placeholder="Header bar" />
@@ -140,12 +140,12 @@
             <label>
               Value
               <div class="unit-field">
-                <input id="compose-value" required autocomplete="off" inputmode="text" placeholder="12 3/8" />
+                <input id="compose-value" required autocomplete="off" inputmode="text" placeholder="12 3/8 or 145" />
                 <span class="unit" id="compose-unit">in</span>
               </div>
               <p class="conv" id="compose-conv"></p>
             </label>
-            <button class="solid" type="submit">Add to Calculator</button>
+            <button class="solid" id="compose-add" type="button">Add to Calculator</button>
           </form>
         </section>
 
@@ -154,7 +154,7 @@
             <h2 id="calc-title">Calculator</h2>
             <button class="text-btn" type="button" id="clear-calc">Clear</button>
           </div>
-          <p class="empty" id="calc-empty">Add a length or angle to start a running total. Use the arrows to reorder.</p>
+          <p class="empty" id="calc-empty">Add a length or an angle to start a running total. Drag a value to reorder.</p>
           <ol class="calc-list" id="calc-list"></ol>
           <div class="result" id="calc-result" aria-live="polite"></div>
         </section>
@@ -166,20 +166,31 @@
         <section class="workspace pipe-space" id="pipe-workspace" aria-label="Pipe cage">
           <svg id="pipe" viewBox="0 0 400 420" role="img" aria-label="Bent pipe centerline"></svg>
           <p class="diagram-msg" id="pipe-msg"></p>
+          <div class="controls" id="pipe-chips"></div>
         </section>
 
         <section class="panel" aria-labelledby="pipe-setup-title">
           <div class="panel-head">
             <h2 id="pipe-setup-title">Die</h2>
           </div>
-          <label class="field">
-            Centerline radius
-            <div class="unit-field">
-              <input id="pipe-clr" autocomplete="off" inputmode="text" placeholder="3" />
-              <span class="unit">in</span>
-            </div>
-            <p class="conv" id="pipe-clr-conv"></p>
-          </label>
+          <div class="cage-fields">
+            <label class="field">
+              Centerline radius
+              <div class="unit-field">
+                <input id="pipe-clr" autocomplete="off" inputmode="text" placeholder="3" />
+                <span class="unit">in</span>
+              </div>
+              <p class="conv" id="pipe-clr-conv"></p>
+            </label>
+            <label class="field">
+              Pipe diameter
+              <div class="unit-field">
+                <input id="pipe-od" autocomplete="off" inputmode="text" placeholder="1 1/2" />
+                <span class="unit">in</span>
+              </div>
+              <p class="conv" id="pipe-od-conv"></p>
+            </label>
+          </div>
         </section>
 
         <section class="panel" aria-labelledby="pipe-steps-title">
@@ -191,6 +202,7 @@
           <div class="dock cage-dock">
             <button class="glass float" type="button" id="add-straight">Add straight</button>
             <button class="glass float" type="button" id="add-bend">Add bend</button>
+            <button class="glass float" type="button" id="add-joint">Add joint</button>
           </div>
         </section>
 
@@ -215,6 +227,15 @@
       </form>
     </dialog>
 
-    <script type="module" src="./js/app.js?v=21"></script>
+    <dialog class="sheet" id="confirm-dialog" aria-labelledby="confirm-title">
+      <h2 id="confirm-title">Please confirm</h2>
+      <p class="save-meta" id="confirm-msg"></p>
+      <div class="sheet-actions">
+        <button class="ghost" id="confirm-cancel" type="button">Cancel</button>
+        <button class="solid" id="confirm-ok" type="button">Clear</button>
+      </div>
+    </dialog>
+
+    <script type="module" src="./js/app.js?v=38"></script>
   </body>
 </html>

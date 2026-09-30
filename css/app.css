@@ -160,6 +160,7 @@ button {
   width: 100%;
   height: 100%;
   display: block;
+  overflow: hidden;
 }
 
 .triangle-fill {
@@ -258,6 +259,11 @@ button {
   font-size: 11px;
   line-height: 1.35;
   font-weight: 500;
+  margin: 4px 0 0;
+  min-height: 1.35em;
+  overflow-wrap: anywhere;
+  position: relative;
+  z-index: 0;
 }
 
 .unit-field {
@@ -267,6 +273,8 @@ button {
   background: var(--paper);
   border-radius: 16px;
   padding-right: 12px;
+  position: relative;
+  z-index: 1;
 }
 
 .unit-field input {
@@ -284,6 +292,32 @@ button {
   fill: var(--muted);
   font-size: 11px;
   font-weight: 650;
+  pointer-events: none;
+}
+
+.pipe-tag {
+  width: 118px;
+  min-height: 46px;
+  padding: 8px 10px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.pipe-tag .lab {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+}
+
+.pipe-space .controls {
+  pointer-events: none;
+}
+
+#pipe,
+#pipe path,
+#pipe circle,
+#pipe line {
   pointer-events: none;
 }
 
@@ -473,6 +507,11 @@ button {
   gap: 12px;
 }
 
+.compose label {
+  display: grid;
+  gap: 6px;
+}
+
 .compose label,
 .field {
   font-size: 13px;
@@ -501,10 +540,28 @@ button {
   cursor: grabbing;
 }
 
+.floor-fill {
+  fill: rgba(40, 34, 24, 0.06);
+  stroke: none;
+}
+
+.floor-grid {
+  fill: none;
+  stroke: var(--ink);
+  stroke-opacity: 0.18;
+  stroke-width: 1;
+}
+
+.floor-edge {
+  fill: none;
+  stroke: var(--ink);
+  stroke-opacity: 0.3;
+  stroke-width: 1.4;
+}
+
 .tube {
   fill: none;
   stroke: var(--stroke);
-  stroke-width: 7;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -512,7 +569,6 @@ button {
 .tube-soft {
   fill: none;
   stroke: var(--fill);
-  stroke-width: 3.25;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -524,7 +580,11 @@ button {
 .pipe-dot.end {
   fill: var(--card);
   stroke: var(--stroke);
-  stroke-width: 2;
+  stroke-width: 1.5;
+}
+
+.pipe-dot.weld {
+  fill: var(--ink);
 }
 
 .cage-list {
@@ -539,6 +599,22 @@ button {
   padding: 12px 12px 12px 14px;
   display: grid;
   gap: 8px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cage-card.is-dragging {
+  cursor: grabbing;
+  opacity: 0.78;
+  box-shadow: 0 10px 24px rgba(40, 34, 24, 0.12);
+}
+
+.cage-card input {
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: manipulation;
 }
 
 .cage-card header {
@@ -574,6 +650,7 @@ button {
 .cage-dock {
   margin: 12px 0 0;
   position: static;
+  flex-wrap: wrap;
 }
 
 .panels {
@@ -690,38 +767,36 @@ button {
 
 .tape-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto 36px;
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
   gap: 8px;
   align-items: center;
   min-height: 56px;
   border-bottom: 1px solid var(--line);
   padding: 8px 0;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tape-row.is-dragging {
+  cursor: grabbing;
+  opacity: 0.78;
+  background: var(--card);
+  border-radius: 16px;
+  box-shadow: 0 10px 24px rgba(40, 34, 24, 0.12);
+}
+
+.op-btn,
+.icon-btn {
+  touch-action: manipulation;
+  cursor: pointer;
 }
 
 .tape-copy {
   display: grid;
   gap: 2px;
   min-width: 0;
-}
-
-.reorder {
-  display: grid;
-  gap: 2px;
-}
-
-.reorder button {
-  width: 28px;
-  height: 20px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--select-soft);
-  color: var(--ink);
-  font-size: 12px;
-  line-height: 1;
-}
-
-.reorder button:disabled {
-  opacity: 0.28;
 }
 
 .tape-name {

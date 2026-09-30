@@ -6,16 +6,18 @@ import {
   parseAngle,
   parseDegrees,
   parseLength,
-} from "./parse.js?v=21";
+} from "./parse.js?v=38";
 import {
   controlAnchors,
   evaluateCalculation,
   layoutTriangle,
+  placeAnchoredBoxes,
   placeAttachedChips,
   solveTriangle,
-} from "./solve.js?v=21";
-import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=21";
-import { loadState, saveState } from "./storage.js?v=21";
+  unit as vecUnit,
+} from "./solve.js?v=38";
+import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=38";
+import { loadState, saveState } from "./storage.js?v=38";
 
 const KEYS = ["a", "b", "c", "A", "B", "C"];
 const SIDE_KEYS = ["a", "b", "c"];
@@ -54,10 +56,19 @@ const pipeStepsEl = document.getElementById("pipe-steps");
 const pipeResult = document.getElementById("pipe-result");
 const pipeMsg = document.getElementById("pipe-msg");
 const pipeStatus = document.getElementById("pipe-status");
+const pipeChips = document.getElementById("pipe-chips");
 const pipeClr = document.getElementById("pipe-clr");
+const pipeOd = document.getElementById("pipe-od");
+const pipeClrConv = document.getElementById("pipe-clr-conv");
+const pipeOdConv = document.getElementById("pipe-od-conv");
+const confirmDialog = document.getElementById("confirm-dialog");
+const confirmMsg = document.getElementById("confirm-msg");
+const confirmOk = document.getElementById("confirm-ok");
+const confirmCancel = document.getElementById("confirm-cancel");
+const composeName = document.getElementById("compose-name");
+const composeValue = document.getElementById("compose-value");
 const composeUnit = document.getElementById("compose-unit");
 const composeConv = document.getElementById("compose-conv");
-const pipeClrConv = document.getElementById("pipe-clr-conv");
 
 const TAB_LABEL = { triangle: "Triangle", combine: "Calculator", pipe: "Pipe" };
 
@@ -77,7 +88,7 @@ const state = {
   lastShape: { a: 9, b: 12, c: 15 },
   tab: stored.tab,
   composeKind: "length",
-  pipe: stored.pipe,
+  pipe: { ...defaultPipe(), ...stored.pipe },
 };
 
 precisionEl.value = String(state.precision);
@@ -101,6 +112,42 @@ function toast(text) {
   window.clearTimeout(toastEl._t);
   toastEl._t = window.setTimeout(() => toastEl.classList.remove("show"), 2200);
 }
+
+let confirmResolve = null;
+
+function askConfirm(message, actionLabel = "Clear") {
+  return new Promise((resolve) => {
+    if (confirmResolve) confirmResolve(false);
+    confirmResolve = resolve;
+    confirmMsg.textContent = message;
+    confirmOk.textContent = actionLabel;
+    const finish = (ok) => {
+      const done = confirmResolve;
+      confirmResolve = null;
+      confirmOk.onclick = null;
+      confirmCancel.onclick = null;
+      if (confirmDialog.open) confirmDialog.close();
+      if (done) done(ok);
+    };
+    confirmOk.onclick = () => finish(true);
+    confirmCancel.onclick = () => finish(false);
+    confirmDialog.showModal();
+    confirmDialog.style.position = "fixed";
+    confirmDialog.style.top = "50%";
+    confirmDialog.style.left = "50%";
+    confirmDialog.style.transform = "translate(-50%, -50%)";
+  });
+}
+
+confirmDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  if (confirmResolve) {
+    const done = confirmResolve;
+    confirmResolve = null;
+    confirmDialog.close();
+    done(false);
+  }
+});
 
 function currentKnown() {
   const known = {};
@@ -216,7 +263,7 @@ function refresh() {
   }
   renderBank();
   renderCalc();
-  if (state.tab === "pipe") renderPipe();
+  if (state.tab === "pipe") renderPipe(true);
 }
 
 function svgToWorkspace(x, y) {
@@ -406,7 +453,7 @@ document.getElementById("save-form").addEventListener("submit", (event) => {
 function lengthConvLine(inches) {
   if (!Number.isFinite(inches)) return "";
   const conv = lengthConversions(inches, state.precision);
-  return `${conv.fractionalInches} · ${conv.decimalInches} · ${conv.mm}`;
+  return `${conv.fractionalInches} · ${conv.feetInches} · ${conv.decimalInches} · ${conv.mm}`;
 }
 
 function angleConvLine(degrees) {
@@ -446,11 +493,13 @@ function renderBank() {
     .join("");
 }
 
-bankEl.addEventListener("click", (event) => {
+bankEl.addEventListener("click", async (event) => {
   const add = event.target.closest("[data-add]");
   const del = event.target.closest("[data-del]");
   if (add) addToCalc(add.dataset.add);
   if (del) {
+    const ok = await askConfirm("Remove this saved measurement?", "Remove");
+    if (!ok) return;
     state.bank = state.bank.filter((item) => item.id !== del.dataset.del);
     persist();
     renderBank();
@@ -476,7 +525,6 @@ function addToCalc(id) {
     op: state.calc.length ? "+" : null,
   });
   persist();
-  setTab("combine");
   renderCalc();
   toast("Added to Calculator");
 }
@@ -491,26 +539,12 @@ function normalizeCalcOps() {
   });
 }
 
-function moveCalc(id, dir) {
-  const i = state.calc.findIndex((item) => item.id === id);
-  const j = i + dir;
-  if (i < 0 || j < 0 || j >= state.calc.length) return;
-  const copy = state.calc.slice();
-  const [row] = copy.splice(i, 1);
-  copy.splice(j, 0, row);
-  state.calc = copy;
-  normalizeCalcOps();
-  persist();
-  renderCalc();
-}
-
 function renderCalc() {
   calcEmpty.hidden = state.calc.length > 0;
   document.getElementById("clear-calc").hidden = state.calc.length === 0;
   calcList.innerHTML = state.calc
     .map((item, i) => {
       const shown = shownValue(item);
-      const last = i === state.calc.length - 1;
       return `<li class="tape-row" data-id="${item.id}">
         ${
           i === 0
@@ -521,10 +555,6 @@ function renderCalc() {
           <span class="tape-name">${escapeHtml(item.name)}</span>
           <span class="tape-val">${shown}</span>
           <span class="conv">${shownAlt(item)}</span>
-        </div>
-        <div class="reorder">
-          <button type="button" data-move="-1" data-id="${item.id}" aria-label="Move ${escapeHtml(item.name)} up" ${i === 0 ? "disabled" : ""}>↑</button>
-          <button type="button" data-move="1" data-id="${item.id}" aria-label="Move ${escapeHtml(item.name)} down" ${last ? "disabled" : ""}>↓</button>
         </div>
         <button class="icon-btn" type="button" data-remove="${item.id}" aria-label="Remove ${escapeHtml(item.name)}">×</button>
       </li>`;
@@ -565,10 +595,14 @@ function renderCalc() {
   }
 }
 
-calcList.addEventListener("click", (event) => {
+calcList.addEventListener("click", async (event) => {
+  if (calcDrag?.moved) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   const opBtn = event.target.closest("[data-op]");
   const remove = event.target.closest("[data-remove]");
-  const move = event.target.closest("[data-move]");
   if (opBtn) {
     const item = state.calc.find((entry) => entry.id === opBtn.dataset.op);
     if (item) {
@@ -579,17 +613,84 @@ calcList.addEventListener("click", (event) => {
     }
     return;
   }
-  if (move) {
-    moveCalc(move.dataset.id, Number(move.dataset.move));
-    return;
-  }
   if (remove) {
+    const ok = await askConfirm("Remove this value from Calculator?", "Remove");
+    if (!ok) return;
     state.calc = state.calc.filter((item) => item.id !== remove.dataset.remove);
     if (state.calc[0]) state.calc[0].op = null;
     persist();
     renderCalc();
   }
 });
+
+let calcDrag = null;
+
+function calcRowAtY(clientY) {
+  const rows = [...calcList.querySelectorAll(".tape-row")];
+  for (let i = 0; i < rows.length; i += 1) {
+    const box = rows[i].getBoundingClientRect();
+    if (clientY < box.top + box.height / 2) return i;
+  }
+  return Math.max(0, rows.length - 1);
+}
+
+function placeCalcRow(row, to) {
+  const rows = [...calcList.querySelectorAll(".tape-row")];
+  const from = rows.indexOf(row);
+  if (from < 0 || from === to) return;
+  const target = rows[to];
+  if (from < to) target.after(row);
+  else target.before(row);
+}
+
+function commitCalcOrder() {
+  const ids = [...calcList.querySelectorAll(".tape-row")].map((el) => el.dataset.id);
+  state.calc = ids.map((id) => state.calc.find((item) => item.id === id)).filter(Boolean);
+  normalizeCalcOps();
+  persist();
+  renderCalc();
+}
+
+calcList.addEventListener("pointerdown", (event) => {
+  if (event.target.closest("[data-op], [data-remove]")) return;
+  const row = event.target.closest(".tape-row");
+  if (!row || state.calc.length < 2) return;
+  calcDrag = {
+    id: row.dataset.id,
+    y: event.clientY,
+    pointerId: event.pointerId,
+    moved: false,
+    row,
+  };
+});
+
+window.addEventListener("pointermove", (event) => {
+  if (!calcDrag) return;
+  if (Math.abs(event.clientY - calcDrag.y) < 6 && !calcDrag.moved) return;
+  if (!calcDrag.moved) {
+    calcDrag.moved = true;
+    calcDrag.row.classList.add("is-dragging");
+    try {
+      calcDrag.row.setPointerCapture(event.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }
+  placeCalcRow(calcDrag.row, calcRowAtY(event.clientY));
+});
+
+function endCalcDrag() {
+  if (!calcDrag) return;
+  const moved = calcDrag.moved;
+  calcDrag.row.classList.remove("is-dragging");
+  if (moved) commitCalcOrder();
+  window.setTimeout(() => {
+    calcDrag = null;
+  }, 0);
+}
+
+window.addEventListener("pointerup", endCalcDrag);
+window.addEventListener("pointercancel", endCalcDrag);
 
 function escapeHtml(value) {
   return String(value)
@@ -599,7 +700,9 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-document.getElementById("clear").addEventListener("click", () => {
+document.getElementById("clear").addEventListener("click", async () => {
+  const ok = await askConfirm("Clear all triangle measurements?", "Clear");
+  if (!ok) return;
   state.raw = { a: "", b: "", c: "", A: "", B: "", C: "" };
   KEYS.forEach((key) => parseKey(key, ""));
   state.solutions = [];
@@ -608,13 +711,17 @@ document.getElementById("clear").addEventListener("click", () => {
   refresh();
 });
 
-document.getElementById("clear-bank").addEventListener("click", () => {
+document.getElementById("clear-bank").addEventListener("click", async () => {
+  const ok = await askConfirm("Remove every saved measurement?", "Clear");
+  if (!ok) return;
   state.bank = [];
   persist();
   renderBank();
 });
 
-document.getElementById("clear-calc").addEventListener("click", () => {
+document.getElementById("clear-calc").addEventListener("click", async () => {
+  const ok = await askConfirm("Clear every value in Calculator?", "Clear");
+  if (!ok) return;
   state.calc = [];
   persist();
   renderCalc();
@@ -645,55 +752,36 @@ function setTab(tab) {
   document.getElementById("view-pipe").hidden = tab !== "pipe";
   if (tab === "triangle") refresh();
   if (tab === "combine") renderCalc();
-  if (tab === "pipe") renderPipe();
+  if (tab === "pipe") renderPipe(true);
 }
 
 document.querySelectorAll(".tab").forEach((btn) => {
   btn.addEventListener("click", () => setTab(btn.dataset.tab));
 });
 
-document.querySelectorAll(".kind").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    state.composeKind = btn.dataset.kind;
-    document.querySelectorAll(".kind").forEach((el) => {
-      el.setAttribute("aria-pressed", String(el === btn));
-    });
-    composeValue.placeholder = state.composeKind === "length" ? "12 3/8" : "45";
-    composeValue.setAttribute("inputmode", state.composeKind === "length" ? "text" : "decimal");
-    if (composeUnit) composeUnit.textContent = state.composeKind === "length" ? "in" : "°";
-    updateComposePreview();
+function setComposeKind(kind) {
+  state.composeKind = kind === "angle" ? "angle" : "length";
+  document.querySelectorAll(".kind").forEach((el) => {
+    el.setAttribute("aria-pressed", String(el.dataset.kind === state.composeKind));
   });
-});
-
-function updateComposePreview() {
-  if (!composeConv) return;
-  const raw = composeValue.value.trim();
-  if (!raw) {
-    composeConv.textContent = "";
-    return;
-  }
-  const parsed = state.composeKind === "length" ? parseLength(raw) : parseAngle(raw);
-  if (parsed.empty || parsed.error) {
-    composeConv.textContent = parsed.error || "";
-    return;
-  }
-  composeConv.textContent =
-    state.composeKind === "length"
-      ? lengthConvLine(parsed.inches)
-      : angleConvLine(parsed.degrees);
+  composeValue.placeholder = state.composeKind === "length" ? "12 3/8 or 145" : "45";
+  composeValue.setAttribute("inputmode", state.composeKind === "length" ? "text" : "decimal");
+  if (composeUnit) composeUnit.textContent = state.composeKind === "length" ? "in" : "°";
+  updateComposePreview();
 }
 
-composeValue.addEventListener("input", updateComposePreview);
+document.querySelectorAll(".kind").forEach((btn) => {
+  btn.addEventListener("click", () => setComposeKind(btn.dataset.kind));
+});
 
-document.getElementById("compose-form").addEventListener("submit", (event) => {
-  event.preventDefault();
+function addCompose() {
   const raw = composeValue.value.trim();
-  const parsed = state.composeKind === "length" ? parseLength(raw) : parseAngle(raw);
+  const kind = state.composeKind;
+  const parsed = kind === "length" ? parseLength(raw) : parseAngle(raw);
   if (parsed.empty || parsed.error) {
     toast(parsed.error || "Enter a measurement.");
     return;
   }
-  const kind = state.composeKind;
   const value = kind === "length" ? parsed.inches : parsed.degrees;
   if (state.calc.length && state.calc[0].kind !== kind) {
     toast(
@@ -720,14 +808,71 @@ document.getElementById("compose-form").addEventListener("submit", (event) => {
   updateComposePreview();
   renderCalc();
   toast("Added to Calculator");
+}
+
+function updateComposePreview() {
+  if (!composeConv) return;
+  const raw = composeValue.value.trim();
+  if (!raw) {
+    composeConv.textContent = "";
+    return;
+  }
+  const parsed = state.composeKind === "length" ? parseLength(raw) : parseAngle(raw);
+  if (parsed.empty || parsed.error) {
+    composeConv.textContent = parsed.error || "";
+    return;
+  }
+  composeConv.textContent =
+    state.composeKind === "length"
+      ? lengthConvLine(parsed.inches)
+      : angleConvLine(parsed.degrees);
+}
+
+composeValue.addEventListener("input", updateComposePreview);
+
+document.getElementById("compose-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  addCompose();
 });
+
+document.getElementById("compose-add").addEventListener("click", (event) => {
+  event.preventDefault();
+  addCompose();
+});
+
+function miterLine(step) {
+  const deflection = Math.abs(step.angle);
+  const miter = Number.isFinite(step.miter) ? step.miter : deflection / 2;
+  const included = 180 - deflection;
+  return `Miter ${formatDecimal(miter, 2)}° each · included ${formatDecimal(included, 2)}°`;
+}
+
+function sitDegrees(raw, label) {
+  const text = String(raw || "").trim();
+  if (!text) return { degrees: 0 };
+  const parsed = parseDegrees(text);
+  if (parsed.empty) return { degrees: 0 };
+  if (parsed.error) return { error: `${label} isn’t recognized.`, degrees: 0 };
+  return { degrees: parsed.degrees };
+}
 
 function parsedPipeSteps() {
   const clr = parseLength(state.pipe.clrRaw);
+  const od = parseLength(state.pipe.odRaw);
+  const startA = sitDegrees(state.pipe.startAngleRaw, "Start angle");
+  const startR = sitDegrees(state.pipe.startRotRaw, "Start rotation");
   const steps = [];
   const errors = [];
-  if (clr.error || !(clr.inches > 0)) errors.push("Enter a centerline radius.");
+  const hasBend = state.pipe.steps.some((step) => step.type === "bend");
+  if (hasBend && (clr.error || !(clr.inches > 0))) errors.push("Enter a centerline radius.");
+  if (od.error || !(od.inches > 0)) errors.push("Enter a pipe diameter.");
+  if (hasBend && clr.inches > 0 && od.inches > 0 && clr.inches + 1e-9 < od.inches / 2) {
+    errors.push("Centerline radius is smaller than the pipe radius.");
+  }
+  if (startA.error) errors.push(startA.error);
+  if (startR.error) errors.push(startR.error);
   let bendN = 0;
+  let jointN = 0;
   state.pipe.steps.forEach((step, i) => {
     if (step.type === "straight") {
       const len = parseLength(step.raw);
@@ -739,75 +884,138 @@ function parsedPipeSteps() {
       steps.push({ ...step, length: len.inches });
       return;
     }
-    bendN += 1;
+    const isJoint = step.type === "joint";
+    if (isJoint) jointN += 1;
+    else bendN += 1;
+    const name = isJoint ? `Joint ${jointN}` : `Bend ${bendN}`;
     const ang = parseDegrees(step.angleRaw);
     const rot = step.rotRaw.trim() ? parseDegrees(step.rotRaw) : { degrees: 0 };
     if (ang.empty || ang.error || !Number.isFinite(ang.degrees) || Math.abs(ang.degrees) < 1e-9) {
-      errors.push(`Bend ${bendN} needs an angle.`);
-      steps.push({ ...step, angle: 0, rotation: 0, radius: clr.inches });
+      errors.push(`${name} needs an angle.`);
+      steps.push({ ...step, angle: 0, rotation: 0, radius: clr.inches, miter: 0 });
       return;
     }
-    if (Math.abs(ang.degrees) >= 360) {
-      errors.push(`Bend ${bendN} must be less than 360°.`);
-      steps.push({ ...step, angle: ang.degrees, rotation: 0, radius: clr.inches });
+    if (isJoint && Math.abs(ang.degrees) >= 180) {
+      errors.push(`${name} must be less than 180°.`);
+      steps.push({ ...step, angle: ang.degrees, rotation: 0, radius: 0, miter: Math.abs(ang.degrees) / 2 });
+      return;
+    }
+    if (!isJoint && Math.abs(ang.degrees) >= 360) {
+      errors.push(`${name} must be less than 360°.`);
+      steps.push({ ...step, angle: ang.degrees, rotation: 0, radius: clr.inches, miter: 0 });
       return;
     }
     if (rot.error || !Number.isFinite(rot.degrees)) {
-      errors.push(`Bend ${bendN} rotation isn’t recognized.`);
-      steps.push({ ...step, angle: ang.degrees, rotation: 0, radius: clr.inches });
+      errors.push(`${name} clock isn’t recognized.`);
+      steps.push({ ...step, angle: ang.degrees, rotation: 0, radius: isJoint ? 0 : clr.inches, miter: Math.abs(ang.degrees) / 2 });
       return;
     }
     steps.push({
       ...step,
       angle: ang.degrees,
       rotation: rot.degrees ?? 0,
-      radius: clr.inches,
+      radius: isJoint ? 0 : clr.inches,
+      miter: Math.abs(ang.degrees) / 2,
     });
   });
-  return { clr: clr.inches, steps, errors };
+  return {
+    clr: clr.inches,
+    od: od.inches,
+    startAngle: startA.degrees || 0,
+    startRot: startR.degrees || 0,
+    steps,
+    errors,
+  };
 }
 
-function renderPipe() {
-  if (!pipeClr) return;
-  const parsed = parsedPipeSteps();
-  if (document.activeElement !== pipeClr) pipeClr.value = state.pipe.clrRaw;
+function pipeSvgToWorkspace(x, y) {
+  const pt = pipeSvg.createSVGPoint();
+  pt.x = x;
+  pt.y = y;
+  const ctm = pipeSvg.getScreenCTM();
+  if (!ctm) return { x, y };
+  const screen = pt.matrixTransform(ctm);
+  const rect = pipeWorkspace.getBoundingClientRect();
+  return { x: screen.x - rect.left, y: screen.y - rect.top };
+}
+
+function pipeWorkspaceToSvg(x, y) {
+  const rect = pipeWorkspace.getBoundingClientRect();
+  const pt = pipeSvg.createSVGPoint();
+  pt.x = rect.left + x;
+  pt.y = rect.top + y;
+  const ctm = pipeSvg.getScreenCTM();
+  if (!ctm) return { x, y };
+  return pt.matrixTransform(ctm.inverse());
+}
+
+function updatePipeStepConvs(parsed) {
   if (pipeClrConv) {
     pipeClrConv.textContent = parsed.clr > 0 ? lengthConvLine(parsed.clr) : "";
   }
-  const model = buildPipe(parsed.clr || 3, parsed.steps);
-  const msgs = [...parsed.errors, ...model.errors];
-  pipeMsg.textContent = msgs[0] || "";
-  pipeStatus.textContent = msgs[0]
-    ? msgs[0]
-    : "Drag the cage to turn it. Rotation is the clock between bends.";
+  if (pipeOdConv) {
+    pipeOdConv.textContent = parsed.od > 0 ? lengthConvLine(parsed.od) : "";
+  }
+  pipeStepsEl.querySelectorAll("[data-straight]").forEach((input) => {
+    const step = parsed.steps.find((s) => s.id === input.dataset.straight);
+    const conv = input.closest("label")?.querySelector(".conv");
+    if (conv) conv.textContent = step?.length ? lengthConvLine(step.length) : "";
+  });
+  pipeStepsEl.querySelectorAll("[data-angle]").forEach((input) => {
+    const step = parsed.steps.find((s) => s.id === input.dataset.angle);
+    const label = input.closest("label");
+    const conv = label?.querySelector(".conv");
+    if (conv) conv.textContent = step?.angle ? angleConvLine(step.angle) : "";
+    const miter = label?.querySelector(".miter");
+    if (miter) miter.textContent = step?.type === "joint" && step.angle ? miterLine(step) : "";
+  });
+  pipeStepsEl.querySelectorAll("[data-rot]").forEach((input) => {
+    const step = parsed.steps.find((s) => s.id === input.dataset.rot);
+    const conv = input.closest("label")?.querySelector(".conv");
+    if (conv) conv.textContent = Number.isFinite(step?.rotation) ? angleConvLine(step.rotation) : "";
+  });
+  const startAng = pipeStepsEl.querySelector("[data-start-angle]");
+  if (startAng) {
+    const conv = startAng.closest("label")?.querySelector(".conv");
+    if (conv) conv.textContent = angleConvLine(parsed.startAngle || 0);
+  }
+  const startRot = pipeStepsEl.querySelector("[data-start-rot]");
+  if (startRot) {
+    const conv = startRot.closest("label")?.querySelector(".conv");
+    if (conv) conv.textContent = angleConvLine(parsed.startRot || 0);
+  }
+}
 
-  const w = Math.max(320, pipeWorkspace.clientWidth);
-  const h = Math.max(320, pipeWorkspace.clientHeight);
-  pipeSvg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  const laid = layoutPipePath(model, w, h, state.pipe.yaw, state.pipe.pitch, 40);
-  const dots = laid.marks
-    .map((m) => {
-      const r = m.kind === "start" || m.kind === "end" ? 5 : 3.25;
-      const cls = m.kind === "end" ? "pipe-dot end" : "pipe-dot";
-      return `<circle class="${cls}" cx="${m.x}" cy="${m.y}" r="${r}" />`;
-    })
-    .join("");
-  const labs = (laid.labels || [])
-    .map(
-      (item) =>
-        `<text class="pipe-lab" x="${item.x}" y="${item.y}" text-anchor="middle" dy="-8">${escapeHtml(item.text)}</text>`
-    )
-    .join("");
-  pipeSvg.innerHTML = laid.d
-    ? `<path class="tube" d="${laid.d}" /><path class="tube-soft" d="${laid.d}" />${dots}${labs}`
-    : "";
+function degField(label, attr, value, shown) {
+  return `<label>${label}
+    <div class="unit-field">
+      <input ${attr} value="${escapeHtml(value)}" placeholder="0" inputmode="decimal" />
+      <span class="unit">°</span>
+    </div>
+    <p class="conv">${shown || ""}</p>
+  </label>`;
+}
 
+function renderPipeList(parsed) {
   let straightN = 0;
   let bendN = 0;
-  const editing = pipeStepsEl.contains(document.activeElement);
-  if (!editing) {
-    pipeStepsEl.innerHTML = state.pipe.steps
-    .map((step) => {
+  let jointN = 0;
+  pipeStepsEl.innerHTML = state.pipe.steps
+    .map((step, index) => {
+      const found = parsed.steps.find((s) => s.id === step.id);
+      const first = index === 0;
+      const sitAng = degField(
+        first && step.type === "straight" ? "Angle" : "Facing",
+        "data-start-angle",
+        state.pipe.startAngleRaw || "0",
+        angleConvLine(parsed.startAngle || 0)
+      );
+      const sitRot = degField(
+        "Start rotation",
+        "data-start-rot",
+        state.pipe.startRotRaw || "0",
+        angleConvLine(parsed.startRot || 0)
+      );
       if (step.type === "straight") {
         straightN += 1;
         return `<li class="cage-card" data-id="${step.id}">
@@ -815,64 +1023,196 @@ function renderPipe() {
             <h3>Straight ${straightN}</h3>
             <button class="icon-btn" type="button" data-drop="${step.id}" aria-label="Remove straight ${straightN}">×</button>
           </header>
-          <div class="cage-fields single">
+          <div class="cage-fields${first ? "" : " single"}">
             <label>Length
               <div class="unit-field">
                 <input data-straight="${step.id}" value="${escapeHtml(step.raw)}" placeholder="12" inputmode="text" />
                 <span class="unit">in</span>
               </div>
-              <p class="conv">${parsed.steps.find((s) => s.id === step.id)?.length ? lengthConvLine(parsed.steps.find((s) => s.id === step.id).length) : ""}</p>
+              <p class="conv">${found?.length ? lengthConvLine(found.length) : ""}</p>
             </label>
+            ${first ? sitAng : ""}
           </div>
         </li>`;
       }
-      bendN += 1;
+      const isJoint = step.type === "joint";
+      if (isJoint) jointN += 1;
+      else bendN += 1;
+      const n = isJoint ? jointN : bendN;
+      const name = isJoint ? `Joint ${n}` : `Bend ${n}`;
       return `<li class="cage-card" data-id="${step.id}">
         <header>
-          <h3>Bend ${bendN}</h3>
-          <button class="icon-btn" type="button" data-drop="${step.id}" aria-label="Remove bend ${bendN}">×</button>
+          <h3>${name}</h3>
+          <button class="icon-btn" type="button" data-drop="${step.id}" aria-label="Remove ${name}">×</button>
         </header>
         <div class="cage-fields">
-          <label>Angle
+          ${first ? sitAng : ""}
+          ${first ? sitRot : ""}
+          <label>${isJoint ? "Joint" : "Bend"}
             <div class="unit-field">
               <input data-angle="${step.id}" value="${escapeHtml(step.angleRaw)}" placeholder="90" inputmode="decimal" />
               <span class="unit">°</span>
             </div>
-            <p class="conv">${parsed.steps.find((s) => s.id === step.id)?.angle ? angleConvLine(parsed.steps.find((s) => s.id === step.id).angle) : ""}</p>
+            <p class="conv">${found?.angle ? angleConvLine(found.angle) : ""}</p>
+            ${isJoint ? `<p class="conv miter">${found?.angle ? miterLine(found) : ""}</p>` : ""}
           </label>
-          <label>Rotation
+          <label>Clock
             <div class="unit-field">
               <input data-rot="${step.id}" value="${escapeHtml(step.rotRaw)}" placeholder="0" inputmode="decimal" />
               <span class="unit">°</span>
             </div>
-            <p class="conv">${Number.isFinite(parsed.steps.find((s) => s.id === step.id)?.rotation) ? angleConvLine(parsed.steps.find((s) => s.id === step.id).rotation) : ""}</p>
+            <p class="conv">${Number.isFinite(found?.rotation) ? angleConvLine(found.rotation) : ""}</p>
           </label>
         </div>
       </li>`;
     })
     .join("");
+}
+
+function renderPipePreview(parsed) {
+  const od = parsed.od > 0 ? parsed.od : 0;
+  const first = state.pipe.steps[0];
+  const firstTurn = first?.type === "bend" || first?.type === "joint";
+  const model = buildPipe(parsed.clr || 3, parsed.steps, od, {
+    angle: parsed.startAngle || 0,
+    rotation: firstTurn ? parsed.startRot || 0 : 0,
+    firstBend: firstTurn,
+  });
+  const msgs = [...parsed.errors, ...model.errors];
+  pipeMsg.textContent = msgs[0] || "";
+  pipeStatus.textContent = msgs[0]
+    ? msgs[0]
+    : "Drag the cage to turn it. Clock rolls around the incoming pipe. Start rotation tilts from the ground.";
+
+  const w = Math.max(320, pipeWorkspace.clientWidth);
+  const h = Math.max(320, pipeWorkspace.clientHeight);
+  pipeSvg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  const laid = layoutPipePath(model, w, h, state.pipe.yaw, state.pipe.pitch, 20, od);
+  const px = laid.scale || 1;
+  const outline = 1.5;
+  const stroke = Math.max(outline, od * px);
+  const inner = Math.max(0, stroke - outline * 2);
+  const dotR = Math.max(outline, stroke / 2);
+  const dots = laid.marks
+    .map((m) => {
+      if (m.kind === "weld") {
+        const s = Math.max(3.5, stroke * 0.28);
+        return `<polygon class="pipe-dot weld" points="${m.x},${m.y - s} ${m.x + s},${m.y} ${m.x},${m.y + s} ${m.x - s},${m.y}" />`;
+      }
+      const r = m.kind === "start" || m.kind === "end" ? dotR : Math.max(1.25, Math.min(dotR * 0.45, 3));
+      const cls = m.kind === "end" ? "pipe-dot end" : "pipe-dot";
+      return `<circle class="${cls}" cx="${m.x}" cy="${m.y}" r="${r}" />`;
+    })
+    .join("");
+
+  const mid = laid.marks.reduce(
+    (acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }),
+    { x: 0, y: 0 }
+  );
+  const nMarks = laid.marks.length || 1;
+  const center = { x: mid.x / nMarks, y: mid.y / nMarks };
+  const chipItems = (laid.labels || []).map((item, i) => {
+    let dir = vecUnit(item.x - center.x, item.y - center.y);
+    if (Math.hypot(dir.x, dir.y) < 0.2) {
+      dir = vecUnit(Math.cos((i * 2.3) + 0.4), Math.sin((i * 2.3) + 0.4));
+    }
+    return {
+      id: `lab-${i}`,
+      ax: item.x,
+      ay: item.y,
+      dir,
+      text: item.text,
+      detail: "",
+    };
+  });
+  const placed = placeAnchoredBoxes(chipItems, { w: 118, h: 46 }, { w, h }, 26);
+
+  if (pipeChips) {
+    pipeChips.innerHTML = placed
+      .map(
+        (box) =>
+          `<div class="measure glass pipe-tag" data-pipe-tag="${box.id}">
+            <p class="lab">${escapeHtml(box.text)}</p>
+          </div>`
+      )
+      .join("");
+    placed.forEach((box) => {
+      const el = pipeChips.querySelector(`[data-pipe-tag="${box.id}"]`);
+      if (!el) return;
+      const pixel = pipeSvgToWorkspace(box.cx, box.cy);
+      el.style.left = `${pixel.x}px`;
+      el.style.top = `${pixel.y}px`;
+    });
   }
+
+  const wr = pipeWorkspace.getBoundingClientRect();
+  const leaders = placed
+    .map((box) => {
+      const el = pipeChips?.querySelector(`[data-pipe-tag="${box.id}"]`);
+      if (!el) return "";
+      const r = el.getBoundingClientRect();
+      const cx = r.left - wr.left + r.width / 2;
+      const cy = r.top - wr.top + r.height / 2;
+      const attach = pipeSvgToWorkspace(box.ax, box.ay);
+      const edge = edgeToward(cx, cy, r.width, r.height, attach.x, attach.y);
+      const end = pipeWorkspaceToSvg(edge.x, edge.y);
+      return `<line class="leader" x1="${box.ax}" y1="${box.ay}" x2="${end.x}" y2="${end.y}" />`;
+    })
+    .join("");
+
+  const floor = laid.floor
+    ? `<path class="floor-fill" d="${laid.floor.fill}" /><path class="floor-grid" d="${laid.floor.grid}" /><path class="floor-edge" d="${laid.floor.edge}" />`
+    : "";
+  pipeSvg.innerHTML = laid.d
+    ? `${floor}${leaders}<path class="tube" d="${laid.d}" style="stroke-width:${stroke.toFixed(2)}" />${inner > 0.25 ? `<path class="tube-soft" d="${laid.d}" style="stroke-width:${inner.toFixed(2)}" />` : ""}${dots}`
+    : `${floor}${leaders}`;
 
   if (msgs.length) {
     pipeResult.innerHTML = `<p class="err">${msgs[0]}</p>`;
     return;
   }
+  if (!state.pipe.steps.length) {
+    pipeResult.innerHTML = "";
+    return;
+  }
   const conv = lengthConversions(model.developed, state.precision);
+  const inside = lengthConversions(model.developedInside, state.precision);
+  const outside = lengthConversions(model.developedOutside, state.precision);
   const reach = lengthConversions(model.reach, state.precision);
+  const odConv = lengthConversions(od, state.precision);
   pipeResult.innerHTML = `<div class="total">
-    <p class="equation">${model.bendCount} bend${model.bendCount === 1 ? "" : "s"} · drag to inspect the cage</p>
-    <div class="total-main"><span>Developed</span><strong>${conv.fractionalInches}</strong></div>
+    <p class="equation">${model.bendCount} bend${model.bendCount === 1 ? "" : "s"} · ${model.jointCount} joint${model.jointCount === 1 ? "" : "s"} · ${odConv.fractionalInches} diameter</p>
+    <div class="total-main"><span>Centerline</span><strong>${conv.fractionalInches}</strong></div>
     <div class="alts">
+      <span>${conv.feetInches}</span>
+      <span>${conv.decimalInches}</span>
       <span>${conv.mm}</span>
+      <span>Inside ${inside.fractionalInches}</span>
+      <span>Outside ${outside.fractionalInches}</span>
       <span>End reach ${reach.fractionalInches}</span>
     </div>
   </div>`;
+}
+
+function renderPipe(rebuildList = false) {
+  if (!pipeClr) return;
+  const parsed = parsedPipeSteps();
+  if (document.activeElement !== pipeClr) pipeClr.value = state.pipe.clrRaw;
+  if (pipeOd && document.activeElement !== pipeOd) pipeOd.value = state.pipe.odRaw || "";
+  updatePipeStepConvs(parsed);
+  if (rebuildList) {
+    if (pipeStepsEl.contains(document.activeElement)) document.activeElement.blur();
+    renderPipeList(parsed);
+  }
+  renderPipePreview(parsed);
 }
 
 pipeStepsEl.addEventListener("input", (event) => {
   const straight = event.target.closest("[data-straight]");
   const angle = event.target.closest("[data-angle]");
   const rot = event.target.closest("[data-rot]");
+  const startAng = event.target.closest("[data-start-angle]");
+  const startRotEl = event.target.closest("[data-start-rot]");
   if (straight) {
     const step = state.pipe.steps.find((item) => item.id === straight.dataset.straight);
     if (step) step.raw = straight.value;
@@ -885,32 +1225,109 @@ pipeStepsEl.addEventListener("input", (event) => {
     const step = state.pipe.steps.find((item) => item.id === rot.dataset.rot);
     if (step) step.rotRaw = rot.value;
   }
+  if (startAng) state.pipe.startAngleRaw = startAng.value;
+  if (startRotEl) state.pipe.startRotRaw = startRotEl.value;
   persist();
-  renderPipe();
+  renderPipe(false);
 });
 
-pipeStepsEl.addEventListener("click", (event) => {
+let cageDrag = null;
+
+pipeStepsEl.addEventListener("click", async (event) => {
+  if (cageDrag?.moved) return;
   const drop = event.target.closest("[data-drop]");
   if (!drop) return;
-  if (state.pipe.steps.length <= 1) {
-    toast("Leave at least one piece in the cage.");
-    return;
-  }
-  state.pipe.steps = state.pipe.steps.filter((step) => step.id !== drop.dataset.drop);
+  const id = drop.dataset.drop;
+  const ok = await askConfirm("Remove this piece from the cage?", "Remove");
+  if (!ok) return;
+  state.pipe.steps = state.pipe.steps.filter((step) => step.id !== id);
   persist();
-  renderPipe();
+  renderPipe(true);
 });
+
+function cageCardAtY(clientY) {
+  const cards = [...pipeStepsEl.querySelectorAll(".cage-card")];
+  for (let i = 0; i < cards.length; i += 1) {
+    const box = cards[i].getBoundingClientRect();
+    if (clientY < box.top + box.height / 2) return i;
+  }
+  return Math.max(0, cards.length - 1);
+}
+
+function placeCageCard(card, to) {
+  const cards = [...pipeStepsEl.querySelectorAll(".cage-card")];
+  const from = cards.indexOf(card);
+  if (from < 0 || from === to) return;
+  const target = cards[to];
+  if (from < to) target.after(card);
+  else target.before(card);
+}
+
+function commitCageOrder() {
+  const ids = [...pipeStepsEl.querySelectorAll(".cage-card")].map((el) => el.dataset.id);
+  state.pipe.steps = ids.map((id) => state.pipe.steps.find((step) => step.id === id)).filter(Boolean);
+  persist();
+  renderPipe(true);
+}
+
+pipeStepsEl.addEventListener("pointerdown", (event) => {
+  if (event.target.closest("input, button, .unit-field")) return;
+  const card = event.target.closest(".cage-card");
+  if (!card || state.pipe.steps.length < 2) return;
+  cageDrag = {
+    id: card.dataset.id,
+    y: event.clientY,
+    moved: false,
+    card,
+  };
+});
+
+window.addEventListener("pointermove", (event) => {
+  if (!cageDrag) return;
+  if (Math.abs(event.clientY - cageDrag.y) < 6 && !cageDrag.moved) return;
+  if (!cageDrag.moved) {
+    cageDrag.moved = true;
+    cageDrag.card.classList.add("is-dragging");
+    try {
+      cageDrag.card.setPointerCapture(event.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }
+  placeCageCard(cageDrag.card, cageCardAtY(event.clientY));
+});
+
+function endCageDrag() {
+  if (!cageDrag) return;
+  const moved = cageDrag.moved;
+  cageDrag.card.classList.remove("is-dragging");
+  if (moved) commitCageOrder();
+  window.setTimeout(() => {
+    cageDrag = null;
+  }, 0);
+}
+
+window.addEventListener("pointerup", endCageDrag);
+window.addEventListener("pointercancel", endCageDrag);
 
 pipeClr.addEventListener("input", () => {
   state.pipe.clrRaw = pipeClr.value;
   persist();
-  renderPipe();
+  renderPipe(false);
 });
+
+if (pipeOd) {
+  pipeOd.addEventListener("input", () => {
+    state.pipe.odRaw = pipeOd.value;
+    persist();
+    renderPipe(false);
+  });
+}
 
 document.getElementById("add-straight").addEventListener("click", () => {
   state.pipe.steps.push({ id: crypto.randomUUID(), type: "straight", raw: "8" });
   persist();
-  renderPipe();
+  renderPipe(true);
 });
 
 document.getElementById("add-bend").addEventListener("click", () => {
@@ -921,26 +1338,54 @@ document.getElementById("add-bend").addEventListener("click", () => {
     rotRaw: "0",
   });
   persist();
-  renderPipe();
+  renderPipe(true);
 });
 
-document.getElementById("clear-pipe").addEventListener("click", () => {
+document.getElementById("add-joint").addEventListener("click", () => {
+  state.pipe.steps.push({
+    id: crypto.randomUUID(),
+    type: "joint",
+    angleRaw: "90",
+    rotRaw: "0",
+  });
+  persist();
+  renderPipe(true);
+});
+
+document.getElementById("clear-pipe").addEventListener("click", async () => {
+  const ok = await askConfirm("Delete every piece in the cage?", "Reset");
+  if (!ok) return;
   state.pipe = defaultPipe();
   persist();
-  renderPipe();
+  renderPipe(true);
 });
 
 let pipeDrag = null;
+function pipeDragTarget(event) {
+  return (
+    event.target === pipeWorkspace ||
+    event.target === pipeSvg ||
+    event.target.closest?.("#pipe") ||
+    event.target.closest?.(".tube") ||
+    event.target.closest?.(".tube-soft")
+  );
+}
 pipeWorkspace.addEventListener("pointerdown", (event) => {
+  if (event.target.closest?.(".pipe-tag")) return;
+  if (!pipeDragTarget(event) && event.target !== pipeWorkspace) return;
   pipeDrag = { x: event.clientX, y: event.clientY, yaw: state.pipe.yaw, pitch: state.pipe.pitch };
   pipeWorkspace.classList.add("is-drag");
-  pipeWorkspace.setPointerCapture(event.pointerId);
+  try {
+    pipeWorkspace.setPointerCapture(event.pointerId);
+  } catch {
+    /* ignore */
+  }
 });
-pipeWorkspace.addEventListener("pointermove", (event) => {
+window.addEventListener("pointermove", (event) => {
   if (!pipeDrag) return;
   state.pipe.yaw = pipeDrag.yaw + (event.clientX - pipeDrag.x) * 0.45;
   state.pipe.pitch = Math.max(-80, Math.min(80, pipeDrag.pitch + (event.clientY - pipeDrag.y) * 0.35));
-  renderPipe();
+  renderPipePreview(parsedPipeSteps());
 });
 const endPipeDrag = () => {
   if (!pipeDrag) return;
@@ -948,12 +1393,14 @@ const endPipeDrag = () => {
   pipeWorkspace.classList.remove("is-drag");
   persist();
 };
+window.addEventListener("pointerup", endPipeDrag);
+window.addEventListener("pointercancel", endPipeDrag);
 pipeWorkspace.addEventListener("pointerup", endPipeDrag);
 pipeWorkspace.addEventListener("pointercancel", endPipeDrag);
 
 window.addEventListener("resize", () => {
-  if (state.tab === "pipe") renderPipe();
-  else refresh();
+  if (state.tab === "pipe") renderPipe(false);
+  else if (state.tab === "triangle") refresh();
 });
 
 let deferredPrompt = null;
@@ -991,7 +1438,7 @@ async function setupPwa() {
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js?v=21");
+    const reg = await navigator.serviceWorker.register("./sw.js?v=38");
     const ready = await navigator.serviceWorker.ready;
     if (ready.active || reg.active) installBtn.textContent = "Ready";
     navigator.serviceWorker.addEventListener("message", (event) => {

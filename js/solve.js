@@ -433,6 +433,70 @@ export function placeAttachedChips(pts, box, bounds, gap = 14) {
   return placed;
 }
 
+export function placeAnchoredBoxes(items, box, bounds, gap = 28) {
+  const inset = 8;
+  const clamp = (cx, cy) => ({
+    cx: Math.min(bounds.w - box.w / 2 - inset, Math.max(box.w / 2 + inset, cx)),
+    cy: Math.min(bounds.h - box.h / 2 - inset, Math.max(box.h / 2 + inset, cy)),
+  });
+  const asRect = (p) => ({
+    x: p.cx - box.w / 2,
+    y: p.cy - box.h / 2,
+    w: box.w,
+    h: box.h,
+  });
+  const placed = items.map((item) => {
+    const dist = reachToBoxEdge(item.dir, box) + gap;
+    const raw = clamp(item.ax + item.dir.x * dist, item.ay + item.dir.y * dist);
+    return {
+      id: item.id,
+      ax: item.ax,
+      ay: item.ay,
+      dx: item.dir.x,
+      dy: item.dir.y,
+      cx: raw.cx,
+      cy: raw.cy,
+      text: item.text,
+      detail: item.detail || "",
+    };
+  });
+  const order = placed.map((_, i) => i);
+  for (let iter = 0; iter < 80; iter += 1) {
+    let moved = false;
+    for (let i = 0; i < order.length; i += 1) {
+      for (let j = i + 1; j < order.length; j += 1) {
+        const a = placed[order[i]];
+        const b = placed[order[j]];
+        if (!boxesOverlap(asRect(a), asRect(b), 16)) continue;
+        const oxp = a.cx - b.cx;
+        const oyp = a.cy - b.cy;
+        const d = Math.hypot(oxp, oyp) || 0.01;
+        const overlapX = (box.w + 16 - Math.abs(oxp)) / 2;
+        const overlapY = (box.h + 16 - Math.abs(oyp)) / 2;
+        const push = Math.max(overlapX, overlapY, 4) / 2;
+        const alongA = clamp(a.cx + a.dx * push * 1.4, a.cy + a.dy * push * 1.4);
+        const alongB = clamp(b.cx + b.dx * push * 1.4, b.cy + b.dy * push * 1.4);
+        if (Math.hypot(alongA.cx - alongB.cx, alongA.cy - alongB.cy) > d) {
+          a.cx = alongA.cx;
+          a.cy = alongA.cy;
+          b.cx = alongB.cx;
+          b.cy = alongB.cy;
+        } else {
+          const ac = clamp(a.cx + (oxp / d) * push, a.cy + (oyp / d) * push);
+          const bc = clamp(b.cx - (oxp / d) * push, b.cy - (oyp / d) * push);
+          a.cx = ac.cx;
+          a.cy = ac.cy;
+          b.cx = bc.cx;
+          b.cy = bc.cy;
+        }
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  return placed;
+}
+
 export function evaluateCalculation(items) {
   if (!items.length) return { empty: true };
   if (items.some((item) => item.op === "/" && item.value === 0 && items.indexOf(item) > 0)) {

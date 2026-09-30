@@ -22,10 +22,10 @@ function sanitizePipe(pipe, fallback) {
         .slice(0, PIPE_STEP_LIMIT)
         .map((step) => {
           if (!step || typeof step !== "object") return null;
-          if (step.type === "bend") {
+          if (step.type === "bend" || step.type === "joint") {
             return {
               id: String(step.id || crypto.randomUUID()),
-              type: "bend",
+              type: step.type === "joint" ? "joint" : "bend",
               angleRaw: String(step.angleRaw ?? ""),
               rotRaw: String(step.rotRaw ?? "0"),
             };
@@ -37,17 +37,30 @@ function sanitizePipe(pipe, fallback) {
           };
         })
         .filter(Boolean)
-    : fallback.steps;
+    : [];
   return {
     clrRaw: String(pipe.clrRaw ?? fallback.clrRaw),
+    odRaw: String(pipe.odRaw ?? fallback.odRaw),
+    startAngleRaw: String(pipe.startAngleRaw ?? fallback.startAngleRaw ?? "0"),
+    startRotRaw: String(pipe.startRotRaw ?? fallback.startRotRaw ?? "0"),
     yaw: Number.isFinite(pipe.yaw) ? pipe.yaw : fallback.yaw,
     pitch: Number.isFinite(pipe.pitch) ? pipe.pitch : fallback.pitch,
-    steps: steps.length ? steps : fallback.steps,
+    steps,
   };
 }
 
+function facingCamera(pipe, fallback) {
+  const next = sanitizePipe(pipe, fallback);
+  const oldIso = Math.abs(next.yaw - 38) < 0.6 && Math.abs(next.pitch - 24) < 0.6;
+  if (oldIso) {
+    next.yaw = fallback.yaw;
+    next.pitch = fallback.pitch;
+  }
+  return next;
+}
+
 export function loadState(makePipe) {
-  const fallbackPipe = makePipe ? makePipe() : { clrRaw: "3", yaw: 38, pitch: 24, steps: [] };
+  const fallbackPipe = makePipe ? makePipe() : { clrRaw: "3", odRaw: "1 1/2", startAngleRaw: "0", startRotRaw: "0", yaw: 0, pitch: 22, steps: [] };
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...defaults, bank: [], calc: [], pipe: fallbackPipe };
@@ -55,12 +68,16 @@ export function loadState(makePipe) {
     const precision = [16, 32, 64].includes(data.precision) ? data.precision : 16;
     const bank = Array.isArray(data.bank) ? data.bank.slice(0, BANK_LIMIT) : [];
     const calc = Array.isArray(data.calc) ? data.calc.slice(0, CALC_LIMIT) : [];
+    const pipe =
+      data.pipeVersion === 3
+        ? facingCamera(data.pipe, fallbackPipe)
+        : fallbackPipe;
     return {
       precision,
       bank,
       calc,
       tab: sanitizeTab(data.tab),
-      pipe: sanitizePipe(data.pipe, fallbackPipe),
+      pipe: { ...pipe, yaw: fallbackPipe.yaw, pitch: fallbackPipe.pitch },
     };
   } catch {
     return { ...defaults, bank: [], calc: [], pipe: fallbackPipe };
@@ -74,6 +91,7 @@ export function saveState(partial, makePipe) {
     bank: (partial.bank ?? current.bank).slice(0, BANK_LIMIT),
     calc: (partial.calc ?? current.calc).slice(0, CALC_LIMIT),
     tab: sanitizeTab(partial.tab ?? current.tab),
+    pipeVersion: 3,
     pipe: sanitizePipe(partial.pipe ?? current.pipe, current.pipe),
   };
   localStorage.setItem(KEY, JSON.stringify(next));
