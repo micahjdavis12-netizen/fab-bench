@@ -157,20 +157,23 @@ export function parseLength(raw) {
   return finishInches(n.value);
 }
 
-export function parseAngle(raw) {
+export function parseDegrees(raw) {
   const text = normalizeInput(raw);
   if (!text) return { empty: true };
   const n = parseNumberToken(text.replace(/\bdeg\b/gi, "").trim());
-  if (n.error) {
-    return { error: "Enter the angle in degrees, such as 45 or 22.5." };
-  }
-  if (!Number.isFinite(n.value)) {
-    return { error: "Enter the angle in degrees, such as 45 or 22.5." };
-  }
-  if (n.value <= 0 || n.value >= 180) {
-    return { error: "Angles must be greater than 0° and less than 180°." };
+  if (n.error || !Number.isFinite(n.value)) {
+    return { error: "Enter the angle in degrees, such as 45 or 90." };
   }
   return { degrees: n.value };
+}
+
+export function parseAngle(raw) {
+  const parsed = parseDegrees(raw);
+  if (parsed.empty || parsed.error) return parsed;
+  if (parsed.degrees <= 0 || parsed.degrees >= 180) {
+    return { error: "Angles must be greater than 0° and less than 180°." };
+  }
+  return parsed;
 }
 
 export function inchesToFractionParts(inches, denom) {

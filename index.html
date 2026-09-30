@@ -13,13 +13,13 @@
     <meta name="apple-mobile-web-app-title" content="Fab Bench" />
     <meta
       name="description"
-      content="Mobile-first triangle and measurement calculator for fabrication and shop layout."
+      content="Mobile-first triangle, pipe, and measurement calculator for fabrication and shop layout."
     />
     <title>Fab Bench</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon-192.png" type="image/png" />
     <link rel="apple-touch-icon" href="./icons/icon-180.png" sizes="180x180" />
-    <link rel="stylesheet" href="./css/app.css?v=18" />
+    <link rel="stylesheet" href="./css/app.css?v=20" />
     <style>
       .saved {
         display: grid !important;
@@ -41,7 +41,7 @@
     </style>
     <script>
       (function () {
-        var build = "18";
+        var build = "20";
         var local = location.hostname === "127.0.0.1" || location.hostname === "localhost";
         var seen = localStorage.getItem("fab-bench-build") === build;
         if (seen && !local) return;
@@ -66,7 +66,7 @@
       <header class="top">
         <div class="brand">
           <h1>Fab Bench</h1>
-          <p>Triangle</p>
+          <p id="view-label">Triangle</p>
         </div>
         <div class="top-actions">
           <label class="precision">
@@ -83,28 +83,34 @@
         </div>
       </header>
 
-      <p class="status-bar" id="status" role="status" aria-live="polite">
-        0 of 3 inputs · Need three measurements
-      </p>
-
-      <section class="workspace" id="workspace" aria-label="Triangle diagram">
-        <svg id="tri" viewBox="0 0 400 420" role="img" aria-labelledby="diagram-msg"></svg>
-        <p class="diagram-msg" id="diagram-msg" role="status"></p>
-        <div class="controls" id="controls"></div>
-        <div class="ssa glass" id="ssa" hidden>
-          <span>Two triangles possible. Pick one.</span>
-          <div class="ssa-btns">
-            <button type="button" data-sol="0" aria-pressed="true">1</button>
-            <button type="button" data-sol="1" aria-pressed="false">2</button>
-          </div>
-        </div>
-      </section>
-
-      <div class="dock">
-        <button class="glass float" type="button" id="clear">Clear triangle</button>
+      <div class="tabs" role="tablist" aria-label="Fab Bench tools">
+        <button class="tab" type="button" role="tab" id="tab-triangle" data-tab="triangle" aria-selected="true" aria-controls="view-triangle">Triangle</button>
+        <button class="tab" type="button" role="tab" id="tab-combine" data-tab="combine" aria-selected="false" aria-controls="view-combine">Combine</button>
+        <button class="tab" type="button" role="tab" id="tab-pipe" data-tab="pipe" aria-selected="false" aria-controls="view-pipe">Pipe</button>
       </div>
 
-      <div class="panels">
+      <div class="view" id="view-triangle" role="tabpanel" aria-labelledby="tab-triangle">
+        <p class="status-bar" id="status" role="status" aria-live="polite">
+          0 of 3 inputs · Need three measurements
+        </p>
+
+        <section class="workspace" id="workspace" aria-label="Triangle diagram">
+          <svg id="tri" viewBox="0 0 400 420" role="img" aria-labelledby="diagram-msg"></svg>
+          <p class="diagram-msg" id="diagram-msg" role="status"></p>
+          <div class="controls" id="controls"></div>
+          <div class="ssa glass" id="ssa" hidden>
+            <span>Two triangles possible. Pick one.</span>
+            <div class="ssa-btns">
+              <button type="button" data-sol="0" aria-pressed="true">1</button>
+              <button type="button" data-sol="1" aria-pressed="false">2</button>
+            </div>
+          </div>
+        </section>
+
+        <div class="dock">
+          <button class="glass float" type="button" id="clear">Clear triangle</button>
+        </div>
+
         <section class="panel" aria-labelledby="bank-title">
           <div class="panel-head">
             <h2 id="bank-title">Saved</h2>
@@ -113,16 +119,74 @@
           <p class="empty" id="bank-empty">Tap + on a solved side or angle to save it.</p>
           <ul class="bank" id="bank"></ul>
         </section>
+      </div>
+
+      <div class="view" id="view-combine" role="tabpanel" aria-labelledby="tab-combine" hidden>
+        <p class="status-bar">Type a length or angle, or bring one over from Saved.</p>
+
+        <section class="panel" aria-labelledby="compose-title">
+          <div class="panel-head">
+            <h2 id="compose-title">Add a value</h2>
+          </div>
+          <div class="kind-toggle" role="group" aria-label="Value type">
+            <button class="kind" type="button" data-kind="length" aria-pressed="true">Length</button>
+            <button class="kind" type="button" data-kind="angle" aria-pressed="false">Angle</button>
+          </div>
+          <form class="compose" id="compose-form">
+            <label>
+              Name
+              <input id="compose-name" maxlength="80" autocomplete="off" placeholder="Header bar" />
+            </label>
+            <label>
+              Value
+              <input id="compose-value" required autocomplete="off" inputmode="text" placeholder="12 3/8" />
+            </label>
+            <button class="solid" type="submit">Add to Combine</button>
+          </form>
+        </section>
 
         <section class="panel" aria-labelledby="calc-title">
           <div class="panel-head">
             <h2 id="calc-title">Combine</h2>
             <button class="text-btn" type="button" id="clear-calc">Clear</button>
           </div>
-          <p class="empty" id="calc-empty">Tap Add on a saved measurement to start a running total.</p>
+          <p class="empty" id="calc-empty">Add a length or angle to start a running total.</p>
           <ol class="calc-list" id="calc-list"></ol>
           <div class="result" id="calc-result" aria-live="polite"></div>
         </section>
+      </div>
+
+      <div class="view" id="view-pipe" role="tabpanel" aria-labelledby="tab-pipe" hidden>
+        <p class="status-bar" id="pipe-status" role="status">Drag the cage to turn it. Add straights and bends below.</p>
+
+        <section class="workspace pipe-space" id="pipe-workspace" aria-label="Pipe cage">
+          <svg id="pipe" viewBox="0 0 400 420" role="img" aria-label="Bent pipe centerline"></svg>
+          <p class="diagram-msg" id="pipe-msg"></p>
+        </section>
+
+        <section class="panel" aria-labelledby="pipe-setup-title">
+          <div class="panel-head">
+            <h2 id="pipe-setup-title">Die</h2>
+          </div>
+          <label class="field">
+            Centerline radius
+            <input id="pipe-clr" autocomplete="off" inputmode="text" placeholder="3" />
+          </label>
+        </section>
+
+        <section class="panel" aria-labelledby="pipe-steps-title">
+          <div class="panel-head">
+            <h2 id="pipe-steps-title">Cage</h2>
+            <button class="text-btn" type="button" id="clear-pipe">Reset</button>
+          </div>
+          <ol class="cage-list" id="pipe-steps"></ol>
+          <div class="dock cage-dock">
+            <button class="glass float" type="button" id="add-straight">Add straight</button>
+            <button class="glass float" type="button" id="add-bend">Add bend</button>
+          </div>
+        </section>
+
+        <div class="result" id="pipe-result" aria-live="polite"></div>
       </div>
     </div>
 
@@ -143,6 +207,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./js/app.js?v=18"></script>
+    <script type="module" src="./js/app.js?v=20"></script>
   </body>
 </html>

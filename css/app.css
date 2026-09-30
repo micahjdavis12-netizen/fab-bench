@@ -362,6 +362,174 @@ button {
   font-weight: 700;
 }
 
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 14px 0 4px;
+  padding: 4px;
+  background: var(--select-soft);
+  border-radius: var(--r-pill);
+}
+
+.tab {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  min-height: 40px;
+  border-radius: var(--r-pill);
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.tab[aria-selected="true"] {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 1px 0 var(--line);
+}
+
+.view[hidden] {
+  display: none !important;
+}
+
+.kind-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 4px;
+  background: var(--select-soft);
+  border-radius: var(--r-pill);
+}
+
+.kind {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  min-height: 38px;
+  border-radius: var(--r-pill);
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.kind[aria-pressed="true"] {
+  background: var(--card);
+  color: var(--ink);
+}
+
+.compose,
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.compose {
+  gap: 12px;
+}
+
+.compose label,
+.field {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.compose input,
+.field input,
+.cage-fields input {
+  border: 0;
+  background: var(--paper);
+  border-radius: 16px;
+  padding: 14px;
+  font-size: 16px;
+  color: var(--ink);
+  width: 100%;
+}
+
+.pipe-space {
+  touch-action: none;
+  cursor: grab;
+}
+
+.pipe-space.is-drag {
+  cursor: grabbing;
+}
+
+.tube {
+  fill: none;
+  stroke: var(--stroke);
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tube-soft {
+  fill: none;
+  stroke: var(--fill);
+  stroke-width: 3.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pipe-dot {
+  fill: var(--ink);
+}
+
+.pipe-dot.end {
+  fill: var(--card);
+  stroke: var(--stroke);
+  stroke-width: 2;
+}
+
+.cage-list {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.cage-card {
+  background: var(--paper);
+  border-radius: 18px;
+  padding: 12px 12px 12px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.cage-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.cage-card h3 {
+  font-size: 15px;
+  letter-spacing: -0.03em;
+}
+
+.cage-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.cage-fields.single {
+  grid-template-columns: 1fr;
+}
+
+.cage-fields label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.cage-dock {
+  margin: 12px 0 0;
+  position: static;
+}
+
 .panels {
   display: grid;
   gap: 14px;
@@ -680,6 +848,10 @@ button {
 @media (max-width: 420px) {
   .precision span {
     display: none;
+  }
+
+  .tab {
+    font-size: 13px;
   }
 }
 
