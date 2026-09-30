@@ -312,13 +312,84 @@ button {
 
 .pipe-space .controls {
   pointer-events: none;
+  z-index: 2;
+}
+
+#pipe {
+  z-index: 1;
 }
 
 #pipe,
 #pipe path,
 #pipe circle,
-#pipe line {
+#pipe line,
+#pipe polygon {
   pointer-events: none;
+}
+
+#pipe .station,
+#pipe .station * {
+  pointer-events: auto;
+}
+
+.station {
+  cursor: pointer;
+}
+
+.station-hit {
+  fill: transparent;
+}
+
+.station.is-picked .station-halo {
+  fill: var(--ink);
+}
+
+.station.is-picked .station-lab {
+  fill: var(--paper);
+}
+
+.pipe-space.is-picking {
+  cursor: pointer;
+}
+
+.pipe-space.is-picking #pipe {
+  z-index: 3;
+}
+
+.pipe-space.is-picking #pipe-chips {
+  z-index: 0;
+}
+
+.pipe-space.is-picking .pipe-tag {
+  opacity: 0.32;
+  filter: saturate(0.7);
+  z-index: 0;
+}
+
+.pipe-space.is-picking .leader {
+  stroke-opacity: 0.12;
+}
+
+.pipe-dist-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 4;
+  pointer-events: auto;
+}
+
+.pipe-frame-btn {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 4;
+  pointer-events: auto;
+}
+
+.pipe-dist-btn[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: transparent;
 }
 
 .measure.is-calc input {
@@ -444,7 +515,7 @@ button {
 
 .tabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   margin: 14px 0 4px;
   padding: 4px;
   background: var(--select-soft);
@@ -457,9 +528,10 @@ button {
   background: transparent;
   min-height: 40px;
   border-radius: var(--r-pill);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 650;
   color: var(--muted);
+  padding: 0 4px;
 }
 
 .tab[aria-selected="true"] {
@@ -497,29 +569,188 @@ button {
   color: var(--ink);
 }
 
-.compose,
-.field {
+.calc-shell {
   display: grid;
-  gap: 6px;
-}
-
-.compose {
   gap: 12px;
 }
 
-.compose label {
+.calc-display {
+  background: var(--paper);
+  border-radius: 22px;
+  padding: 14px 16px 12px;
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
-.compose label,
-.field {
+.calc-expr {
+  min-height: 1.2em;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--muted);
+  text-align: right;
+}
+
+.calc-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.calc-readout input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  min-width: 0;
+  padding: 0;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.calc-readout .unit {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.calc-display .conv {
+  text-align: right;
+}
+
+.calc-pad {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.calc-key {
+  border: 0;
+  min-height: 56px;
+  border-radius: 18px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+.calc-key.fn {
+  background: var(--select-soft);
+  font-size: 16px;
+}
+
+.calc-key.op {
+  background: var(--chip);
+}
+
+.calc-key.eq {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.calc-key.wide {
+  grid-column: span 2;
+}
+
+.station-lab {
+  font-size: 11px;
+  font-weight: 700;
+  fill: var(--ink);
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.station-halo {
+  fill: var(--card);
+  stroke: var(--stroke);
+  stroke-width: 1.2;
+}
+
+.dist-pick {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 8px;
+  align-items: end;
+}
+
+.dist-pick label {
+  display: grid;
+  gap: 6px;
   font-size: 13px;
   font-weight: 650;
   color: var(--muted);
 }
 
-.compose input,
+.dist-pick select {
+  border: 0;
+  background: var(--paper);
+  border-radius: 16px;
+  padding: 12px;
+  font-size: 16px;
+  color: var(--ink);
+  width: 100%;
+}
+
+.dist-swap {
+  margin-bottom: 4px;
+}
+
+.dist-list {
+  list-style: none;
+  display: grid;
+  gap: 0;
+}
+
+.dist-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.dist-row[data-dist-to] {
+  cursor: pointer;
+}
+
+.dist-row button {
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+}
+
+.dist-id {
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.dist-hint {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.dist-len {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
 .field input,
 .cage-fields input {
   border: 0;
@@ -534,6 +765,22 @@ button {
 .pipe-space {
   touch-action: none;
   cursor: grab;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.pipe-space svg,
+.pipe-space .controls {
+  touch-action: none;
+}
+
+.pipe-space > button {
+  touch-action: manipulation;
+  -webkit-user-select: auto;
+  user-select: auto;
 }
 
 .pipe-space.is-drag {
@@ -590,15 +837,15 @@ button {
 .cage-list {
   list-style: none;
   display: grid;
-  gap: 16px;
+  gap: 8px;
 }
 
 .cage-card {
   background: var(--paper);
-  border-radius: 18px;
-  padding: 12px 12px 12px 14px;
+  border-radius: 14px;
+  padding: 8px 8px 8px 10px;
   display: grid;
-  gap: 8px;
+  gap: 4px;
   cursor: grab;
   user-select: none;
   -webkit-user-select: none;
@@ -622,17 +869,24 @@ button {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  min-height: 28px;
 }
 
 .cage-card h3 {
-  font-size: 15px;
+  font-size: 13px;
   letter-spacing: -0.03em;
+}
+
+.cage-card .icon-btn {
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
 }
 
 .cage-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 6px;
 }
 
 .cage-fields.single {
@@ -641,16 +895,40 @@ button {
 
 .cage-fields label {
   display: grid;
-  gap: 4px;
-  font-size: 12px;
+  gap: 2px;
+  font-size: 11px;
   font-weight: 650;
   color: var(--muted);
 }
 
+.cage-fields .unit-field {
+  background: var(--card);
+  border-radius: 12px;
+  padding-right: 10px;
+}
+
+.cage-fields input {
+  padding: 8px 10px;
+}
+
+.cage-card .conv {
+  margin: 0;
+  min-height: 0;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
 .cage-dock {
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   position: static;
   flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cage-dock .float {
+  padding: 10px 12px;
+  min-height: 44px;
+  font-size: 14px;
 }
 
 .panels {
@@ -738,17 +1016,6 @@ button {
   margin-left: auto;
 }
 
-.use {
-  border: 0;
-  border-radius: var(--r-pill);
-  min-height: 36px;
-  padding: 0 14px;
-  background: var(--ink);
-  color: var(--paper);
-  font-size: 14px;
-  font-weight: 650;
-}
-
 .icon-btn {
   width: 36px;
   height: 36px;
@@ -767,16 +1034,13 @@ button {
 
 .tape-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  grid-template-columns: minmax(0, 1fr) 36px;
   gap: 8px;
   align-items: center;
   min-height: 56px;
   border-bottom: 1px solid var(--line);
   padding: 8px 0;
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
+  cursor: pointer;
 }
 
 .tape-row.is-dragging {
@@ -785,6 +1049,12 @@ button {
   background: var(--card);
   border-radius: 16px;
   box-shadow: 0 10px 24px rgba(40, 34, 24, 0.12);
+}
+
+.tape-expr {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--muted);
 }
 
 .op-btn,

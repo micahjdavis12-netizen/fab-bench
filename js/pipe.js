@@ -51,6 +51,9 @@ export function defaultPipe() {
     startRotRaw: "0",
     yaw: 0,
     pitch: 22,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
     steps: [],
   };
 }
@@ -91,6 +94,17 @@ function pitchFromGround(T, N, deg) {
   return { T: unit(rot(T, a, deg)), N: unit(rot(N, a, deg)) };
 }
 
+function stationLabel(index) {
+  let n = index + 1;
+  let s = "";
+  while (n > 0) {
+    n -= 1;
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26);
+  }
+  return s;
+}
+
 export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, firstBend: false }) {
   const pts = [];
   const marks = [];
@@ -114,8 +128,30 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
   const errors = [];
   const pipeR = od > 0 ? od / 2 : 0;
 
+  const stations = [];
+  const addStation = (hint) => {
+    const last = stations[stations.length - 1];
+    if (last && hypot3(sub(last, pos)) < 1e-6) {
+      if (hint && !last.hint.includes(hint)) last.hint = `${last.hint} · ${hint}`;
+      return last;
+    }
+    const name = stationLabel(stations.length);
+    const next = {
+      id: name,
+      name,
+      hint,
+      x: pos.x,
+      y: pos.y,
+      z: pos.z,
+      along: developed,
+    };
+    stations.push(next);
+    return next;
+  };
+
   pts.push({ ...pos, kind: "start" });
   marks.push({ ...pos, kind: "start" });
+  addStation("Start");
 
   steps.forEach((step, index) => {
     if (step.type === "straight") {
@@ -137,6 +173,7 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
       pts.push({ ...next, kind: "straight" });
       pos = next;
       marks.push({ ...pos, kind: "joint" });
+      addStation(`Straight ${n} end`);
       return;
     }
 
@@ -162,6 +199,7 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
       });
       marks.push({ ...pos, kind: "weld" });
       pts.push({ ...pos, kind: "joint" });
+      addStation(`Joint ${jointCount}`);
       return;
     }
 
@@ -205,6 +243,7 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
       at: add(C, rot(rel0, N, angle / 2)),
     });
     marks.push({ ...pos, kind: "bend" });
+    addStation(`Bend ${bendCount} exit`);
   });
 
   if (marks.length && marks[marks.length - 1].kind !== "weld") {
@@ -222,6 +261,7 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
     od,
     bendCount,
     jointCount,
+    stations,
     end: pos,
     reach: hypot3(pos),
     errors,
@@ -308,7 +348,7 @@ function worldFrame(pts, od = 0) {
   return { c, r: Math.max(r, 0.75) + (od > 0 ? od / 2 : 0) };
 }
 
-export function layoutPipePath(model, width, height, yaw, pitch, pad = 36, od = 0) {
+export function layoutPipePath(model, width, height, yaw, pitch, pad = 36, od = 0, view = {}) {
   const projected = model.pts.map((p) => projectPoint(p, yaw, pitch));
   const marks = model.marks.map((p) => projectPoint(p, yaw, pitch));
   const labels = (model.labels || []).map((item) => ({
@@ -317,7 +357,7 @@ export function layoutPipePath(model, width, height, yaw, pitch, pad = 36, od = 
     kind: item.kind,
   }));
   if (!projected.length) {
-    return { d: "", marks: [], labels: [], floor: null, scale: 1, width, height };
+    return { d: "", marks: [], labels: [], stations: [], floor: null, scale: 1, width, height };
   }
   const frame = worldFrame(model.pts, od);
   const floor = makeFloor(model.pts, od, frame);
@@ -326,10 +366,13 @@ export function layoutPipePath(model, width, height, yaw, pitch, pad = 36, od = 
     a: projectPoint(line.a, yaw, pitch),
     b: projectPoint(line.b, yaw, pitch),
   }));
-  const scaleN = (Math.min(width, height) - pad * 2) / (2 * frame.r);
+  const zoom = Math.max(0.4, Math.min(8, Number(view.zoom) || 1));
+  const panX = Number.isFinite(view.panX) ? view.panX : 0;
+  const panY = Number.isFinite(view.panY) ? view.panY : 0;
+  const scaleN = ((Math.min(width, height) - pad * 2) / (2 * frame.r)) * zoom;
   const mid = projectPoint(frame.c, yaw, pitch);
-  const ox = width / 2 - mid.x * scaleN;
-  const oy = height / 2 - mid.y * scaleN;
+  const ox = width / 2 - mid.x * scaleN + panX;
+  const oy = height / 2 - mid.y * scaleN + panY;
   const map = (p) => ({ x: p.x * scaleN + ox, y: p.y * scaleN + oy });
   const mapped = projected.map(map);
   const mappedCorners = floorCorners.map(map);
@@ -352,6 +395,12 @@ export function layoutPipePath(model, width, height, yaw, pitch, pad = 36, od = 
     d,
     marks: marks.map((p, i) => ({ ...map(p), kind: model.marks[i].kind })),
     labels: labels.map((item) => ({ ...map(item), text: item.text, kind: item.kind })),
+    stations: (model.stations || []).map((item) => ({
+      ...map(projectPoint(item, yaw, pitch)),
+      id: item.id,
+      name: item.name,
+      hint: item.hint,
+    })),
     floor: { fill, grid, edge },
     scale: scaleN,
     width,

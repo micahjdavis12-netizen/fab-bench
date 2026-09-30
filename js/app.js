@@ -6,7 +6,7 @@ import {
   parseAngle,
   parseDegrees,
   parseLength,
-} from "./parse.js?v=38";
+} from "./parse.js?v=48";
 import {
   controlAnchors,
   evaluateCalculation,
@@ -15,9 +15,9 @@ import {
   placeAttachedChips,
   solveTriangle,
   unit as vecUnit,
-} from "./solve.js?v=38";
-import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=38";
-import { loadState, saveState } from "./storage.js?v=38";
+} from "./solve.js?v=48";
+import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=48";
+import { loadState, saveState } from "./storage.js?v=48";
 
 const KEYS = ["a", "b", "c", "A", "B", "C"];
 const SIDE_KEYS = ["a", "b", "c"];
@@ -29,8 +29,43 @@ const LABELS = {
   B: "Angle B",
   C: "Angle C",
 };
-const OPS = ["+", "-", "*", "/"];
 const OP_MARK = { "+": "+", "-": "−", "*": "×", "/": "÷" };
+
+function formatCalc(kind, value, precision) {
+  return kind === "length"
+    ? lengthConversions(value, precision).fractionalInches
+    : angleConversions(value).degrees;
+}
+
+function migrateCalc(items, precision) {
+  if (!Array.isArray(items) || !items.length) return [];
+  if (items.some((item) => item && typeof item.expr === "string")) {
+    return items
+      .filter((item) => item && typeof item.expr === "string" && Number.isFinite(item.value))
+      .map((item) => ({
+        id: String(item.id || crypto.randomUUID()),
+        kind: item.kind === "angle" ? "angle" : "length",
+        expr: String(item.expr),
+        value: Number(item.value),
+      }));
+  }
+  const tape = items.filter((item) => item && Number.isFinite(item.value));
+  if (!tape.length) return [];
+  const result = evaluateCalculation(tape);
+  if (result.empty || result.error || !Number.isFinite(result.value)) return [];
+  const kind = tape[0].kind === "angle" ? "angle" : "length";
+  const expr = tape
+    .map((item, i) => `${i === 0 ? "" : ` ${OP_MARK[item.op] || "+"} `}${formatCalc(kind, item.value, precision)}`)
+    .join("");
+  return [
+    {
+      id: crypto.randomUUID(),
+      kind,
+      expr: `${expr} = ${formatCalc(kind, result.value, precision)}`,
+      value: result.value,
+    },
+  ];
+}
 
 const controlsEl = document.getElementById("controls");
 const svg = document.getElementById("tri");
@@ -42,7 +77,11 @@ const bankEl = document.getElementById("bank");
 const bankEmpty = document.getElementById("bank-empty");
 const calcList = document.getElementById("calc-list");
 const calcEmpty = document.getElementById("calc-empty");
-const calcResult = document.getElementById("calc-result");
+const calcEntry = document.getElementById("calc-entry");
+const calcExpr = document.getElementById("calc-expr");
+const calcConv = document.getElementById("calc-conv");
+const calcUnit = document.getElementById("calc-unit");
+const calcPad = document.getElementById("calc-pad");
 const dialog = document.getElementById("save-dialog");
 const saveMeta = document.getElementById("save-meta");
 const saveName = document.getElementById("save-name");
@@ -65,12 +104,17 @@ const confirmDialog = document.getElementById("confirm-dialog");
 const confirmMsg = document.getElementById("confirm-msg");
 const confirmOk = document.getElementById("confirm-ok");
 const confirmCancel = document.getElementById("confirm-cancel");
-const composeName = document.getElementById("compose-name");
-const composeValue = document.getElementById("compose-value");
-const composeUnit = document.getElementById("compose-unit");
-const composeConv = document.getElementById("compose-conv");
+const distFromEl = document.getElementById("dist-from");
+const distToEl = document.getElementById("dist-to");
+const distResult = document.getElementById("dist-result");
+const distFromList = document.getElementById("dist-from-list");
+const distFromEmpty = document.getElementById("dist-from-empty");
+const distPoints = document.getElementById("dist-points");
+const distPickBtn = document.getElementById("dist-pick-btn");
+const distSwap = document.getElementById("dist-swap");
+const pipeRecenter = document.getElementById("pipe-recenter");
 
-const TAB_LABEL = { triangle: "Triangle", combine: "Calculator", pipe: "Pipe" };
+const TAB_LABEL = { triangle: "Triangle", combine: "Calculator", pipe: "Pipe", distance: "Distance" };
 
 const stored = loadState(defaultPipe);
 
@@ -83,13 +127,26 @@ const state = {
   solutionIndex: 0,
   precision: stored.precision,
   bank: stored.bank,
-  calc: stored.calc,
+  calc: migrateCalc(stored.calc, stored.precision),
   saveTarget: null,
   lastShape: { a: 9, b: 12, c: 15 },
   tab: stored.tab,
-  composeKind: "length",
+  distFrom: stored.distFrom || "",
+  distTo: stored.distTo || "",
   pipe: { ...defaultPipe(), ...stored.pipe },
 };
+
+const desk = {
+  kind: "length",
+  acc: null,
+  op: null,
+  entry: "",
+  expr: "",
+  fresh: true,
+};
+
+let pickDist = false;
+let pickIds = [];
 
 precisionEl.value = String(state.precision);
 
@@ -100,6 +157,8 @@ function persist() {
       bank: state.bank,
       calc: state.calc,
       tab: state.tab,
+      distFrom: state.distFrom,
+      distTo: state.distTo,
       pipe: state.pipe,
     },
     defaultPipe
@@ -462,12 +521,6 @@ function angleConvLine(degrees) {
   return `${conv.degrees} · ${formatDecimal(degrees, 3)} deg · ${conv.radians}`;
 }
 
-function shownValue(item) {
-  return item.kind === "length"
-    ? lengthConversions(item.value, state.precision).fractionalInches
-    : angleConversions(item.value).degrees;
-}
-
 function renderBank() {
   bankEmpty.hidden = state.bank.length > 0;
   document.getElementById("clear-bank").hidden = state.bank.length === 0;
@@ -485,7 +538,6 @@ function renderBank() {
           <p class="meta">${item.kind === "length" ? lengthConvLine(item.value) : angleConvLine(item.value)}</p>
         </div>
         <div class="saved-actions" style="display:flex;align-items:center;gap:8px">
-          <button class="use" type="button" data-add="${item.id}" aria-label="Add ${escapeHtml(item.name)} to Calculator">Add</button>
           <button class="icon-btn" type="button" data-del="${item.id}" aria-label="Delete ${escapeHtml(item.name)}">×</button>
         </div>
       </li>`;
@@ -494,9 +546,7 @@ function renderBank() {
 }
 
 bankEl.addEventListener("click", async (event) => {
-  const add = event.target.closest("[data-add]");
   const del = event.target.closest("[data-del]");
-  if (add) addToCalc(add.dataset.add);
   if (del) {
     const ok = await askConfirm("Remove this saved measurement?", "Remove");
     if (!ok) return;
@@ -506,191 +556,200 @@ bankEl.addEventListener("click", async (event) => {
   }
 });
 
-function addToCalc(id) {
-  const item = state.bank.find((entry) => entry.id === id);
-  if (!item) return;
-  if (state.calc.length && state.calc[0].kind !== item.kind) {
-    toast(
-      item.kind === "angle"
-        ? "Calculator is using lengths. Clear it before adding an angle."
-        : "Calculator is using angles. Clear it before adding a length."
-    );
-    return;
-  }
-  state.calc.push({
-    id: crypto.randomUUID(),
-    name: item.name,
-    kind: item.kind,
-    value: item.value,
-    op: state.calc.length ? "+" : null,
-  });
-  persist();
-  renderCalc();
-  toast("Added to Calculator");
-}
-
 function shownAlt(item) {
   return item.kind === "length" ? lengthConvLine(item.value) : angleConvLine(item.value);
 }
 
-function normalizeCalcOps() {
-  state.calc.forEach((item, i) => {
-    item.op = i === 0 ? null : item.op || "+";
+function resetDesk() {
+  desk.acc = null;
+  desk.op = null;
+  desk.entry = "";
+  desk.expr = "";
+  desk.fresh = true;
+}
+
+function parseDesk() {
+  const raw = desk.entry.trim();
+  if (!raw) {
+    if (desk.acc != null) return { value: desk.acc };
+    return { empty: true };
+  }
+  if (desk.kind === "length") {
+    const parsed = parseLength(raw);
+    if (!parsed.error && !parsed.empty) return { value: parsed.inches };
+    if (parsed.empty) return desk.acc != null ? { value: desk.acc } : { empty: true };
+    const loose = parseDegrees(raw);
+    if (!loose.error && Number.isFinite(loose.degrees)) return { value: loose.degrees };
+    return { error: parsed.error };
+  }
+  const parsed = parseDegrees(raw);
+  if (parsed.empty) return desk.acc != null ? { value: desk.acc } : { empty: true };
+  if (parsed.error) return parsed;
+  return { value: parsed.degrees };
+}
+
+function applyOp(a, op, b) {
+  if (op === "/" && Math.abs(b) < 1e-12) return { error: "Division by zero isn’t allowed." };
+  const value = op === "+" ? a + b : op === "-" ? a - b : op === "*" ? a * b : a / b;
+  if (!Number.isFinite(value)) return { error: "That calculation couldn’t be completed." };
+  return { value };
+}
+
+function pushRecent(expr, value) {
+  state.calc.unshift({
+    id: crypto.randomUUID(),
+    kind: desk.kind,
+    expr,
+    value,
+  });
+  state.calc = state.calc.slice(0, 100);
+  persist();
+}
+
+function deskConvText() {
+  const parsed = parseDesk();
+  if (parsed.empty || parsed.error || !Number.isFinite(parsed.value)) return parsed.error || "";
+  return desk.kind === "length" ? lengthConvLine(parsed.value) : angleConvLine(parsed.value);
+}
+
+function renderDesk() {
+  if (calcExpr) calcExpr.textContent = desk.expr;
+  if (calcUnit) calcUnit.textContent = desk.kind === "length" ? "in" : "°";
+  if (calcEntry && document.activeElement !== calcEntry) {
+    calcEntry.value = desk.entry || "0";
+  } else if (calcEntry && desk.fresh && document.activeElement !== calcEntry) {
+    calcEntry.value = desk.entry || "0";
+  }
+  if (calcConv) calcConv.textContent = deskConvText();
+  document.querySelectorAll(".kind").forEach((el) => {
+    el.setAttribute("aria-pressed", String(el.dataset.kind === desk.kind));
   });
 }
 
 function renderCalc() {
+  renderDesk();
   calcEmpty.hidden = state.calc.length > 0;
   document.getElementById("clear-calc").hidden = state.calc.length === 0;
   calcList.innerHTML = state.calc
-    .map((item, i) => {
-      const shown = shownValue(item);
+    .map((item) => {
+      const shown = formatCalc(item.kind, item.value, state.precision);
       return `<li class="tape-row" data-id="${item.id}">
-        ${
-          i === 0
-            ? `<span class="op-slot" aria-hidden="true"></span>`
-            : `<button class="op-btn" type="button" data-op="${item.id}" aria-label="Change operation, currently ${OP_MARK[item.op]}" title="Tap to switch +, −, ×, ÷">${OP_MARK[item.op]}</button>`
-        }
         <div class="tape-copy">
-          <span class="tape-name">${escapeHtml(item.name)}</span>
+          <span class="tape-expr">${escapeHtml(item.expr)}</span>
           <span class="tape-val">${shown}</span>
           <span class="conv">${shownAlt(item)}</span>
         </div>
-        <button class="icon-btn" type="button" data-remove="${item.id}" aria-label="Remove ${escapeHtml(item.name)}">×</button>
+        <button class="icon-btn" type="button" data-remove="${item.id}" aria-label="Remove calculation">×</button>
       </li>`;
     })
     .join("");
-
-  const result = evaluateCalculation(state.calc);
-  if (result.empty) {
-    calcResult.innerHTML = "";
-    return;
-  }
-  if (result.error) {
-    calcResult.innerHTML = `<p class="err">${result.error}</p>`;
-    return;
-  }
-  const kind = state.calc[0].kind;
-  const expr = state.calc
-    .map((item, i) => `${i === 0 ? "" : ` ${OP_MARK[item.op]} `}${shownValue(item)}`)
-    .join("");
-  if (kind === "length") {
-    const conv = lengthConversions(result.value, state.precision);
-    calcResult.innerHTML = `<div class="total">
-      <p class="equation">${expr} = ${conv.fractionalInches}</p>
-      <div class="total-main"><span>Total</span><strong>${conv.fractionalInches}</strong></div>
-      <div class="alts">
-        <span>${conv.feetInches}</span>
-        <span>${conv.decimalInches}</span>
-        <span>${conv.mm}</span>
-      </div>
-    </div>`;
-  } else {
-    const conv = angleConversions(result.value);
-    calcResult.innerHTML = `<div class="total">
-      <p class="equation">${expr} = ${conv.degrees}</p>
-      <div class="total-main"><span>Total</span><strong>${conv.degrees}</strong></div>
-      <div class="alts"><span>${conv.radians}</span></div>
-    </div>`;
-  }
 }
 
-calcList.addEventListener("click", async (event) => {
-  if (calcDrag?.moved) {
-    event.preventDefault();
-    event.stopPropagation();
-    return;
-  }
-  const opBtn = event.target.closest("[data-op]");
-  const remove = event.target.closest("[data-remove]");
-  if (opBtn) {
-    const item = state.calc.find((entry) => entry.id === opBtn.dataset.op);
-    if (item) {
-      const i = OPS.indexOf(item.op);
-      item.op = OPS[(i + 1) % OPS.length];
-      persist();
+function typeKey(ch) {
+  if (desk.fresh) desk.entry = ch === "." ? "0." : ch;
+  else desk.entry += ch;
+  desk.fresh = false;
+}
+
+function pressOp(op) {
+  const parsed = parseDesk();
+  if (parsed.empty) {
+    if (desk.acc != null) {
+      desk.op = op;
+      desk.expr = `${formatCalc(desk.kind, desk.acc, state.precision)} ${OP_MARK[op]}`;
+      desk.fresh = true;
       renderCalc();
     }
     return;
   }
-  if (remove) {
-    const ok = await askConfirm("Remove this value from Calculator?", "Remove");
-    if (!ok) return;
-    state.calc = state.calc.filter((item) => item.id !== remove.dataset.remove);
-    if (state.calc[0]) state.calc[0].op = null;
-    persist();
-    renderCalc();
+  if (parsed.error) {
+    toast(parsed.error);
+    return;
   }
-});
-
-let calcDrag = null;
-
-function calcRowAtY(clientY) {
-  const rows = [...calcList.querySelectorAll(".tape-row")];
-  for (let i = 0; i < rows.length; i += 1) {
-    const box = rows[i].getBoundingClientRect();
-    if (clientY < box.top + box.height / 2) return i;
+  if (desk.op && desk.acc != null && !desk.fresh) {
+    const next = applyOp(desk.acc, desk.op, parsed.value);
+    if (next.error) {
+      toast(next.error);
+      return;
+    }
+    desk.acc = next.value;
+  } else {
+    desk.acc = parsed.value;
   }
-  return Math.max(0, rows.length - 1);
-}
-
-function placeCalcRow(row, to) {
-  const rows = [...calcList.querySelectorAll(".tape-row")];
-  const from = rows.indexOf(row);
-  if (from < 0 || from === to) return;
-  const target = rows[to];
-  if (from < to) target.after(row);
-  else target.before(row);
-}
-
-function commitCalcOrder() {
-  const ids = [...calcList.querySelectorAll(".tape-row")].map((el) => el.dataset.id);
-  state.calc = ids.map((id) => state.calc.find((item) => item.id === id)).filter(Boolean);
-  normalizeCalcOps();
-  persist();
+  desk.op = op;
+  desk.entry = formatCalc(desk.kind, desk.acc, state.precision);
+  desk.expr = `${desk.entry} ${OP_MARK[op]}`;
+  desk.fresh = true;
   renderCalc();
 }
 
-calcList.addEventListener("pointerdown", (event) => {
-  if (event.target.closest("[data-op], [data-remove]")) return;
-  const row = event.target.closest(".tape-row");
-  if (!row || state.calc.length < 2) return;
-  calcDrag = {
-    id: row.dataset.id,
-    y: event.clientY,
-    pointerId: event.pointerId,
-    moved: false,
-    row,
-  };
-});
-
-window.addEventListener("pointermove", (event) => {
-  if (!calcDrag) return;
-  if (Math.abs(event.clientY - calcDrag.y) < 6 && !calcDrag.moved) return;
-  if (!calcDrag.moved) {
-    calcDrag.moved = true;
-    calcDrag.row.classList.add("is-dragging");
-    try {
-      calcDrag.row.setPointerCapture(event.pointerId);
-    } catch {
-      /* ignore */
-    }
+function pressEquals() {
+  const parsed = parseDesk();
+  if (parsed.empty) return;
+  if (parsed.error) {
+    toast(parsed.error);
+    return;
   }
-  placeCalcRow(calcDrag.row, calcRowAtY(event.clientY));
-});
-
-function endCalcDrag() {
-  if (!calcDrag) return;
-  const moved = calcDrag.moved;
-  calcDrag.row.classList.remove("is-dragging");
-  if (moved) commitCalcOrder();
-  window.setTimeout(() => {
-    calcDrag = null;
-  }, 0);
+  if (desk.op && desk.acc != null) {
+    const next = applyOp(desk.acc, desk.op, parsed.value);
+    if (next.error) {
+      toast(next.error);
+      return;
+    }
+    const left = formatCalc(desk.kind, desk.acc, state.precision);
+    const right = formatCalc(desk.kind, parsed.value, state.precision);
+    const shown = formatCalc(desk.kind, next.value, state.precision);
+    const expr = `${left} ${OP_MARK[desk.op]} ${right} = ${shown}`;
+    desk.acc = next.value;
+    desk.op = null;
+    desk.entry = shown;
+    desk.expr = expr;
+    desk.fresh = true;
+    pushRecent(expr, next.value);
+    renderCalc();
+    return;
+  }
+  desk.acc = parsed.value;
+  desk.entry = formatCalc(desk.kind, parsed.value, state.precision);
+  desk.fresh = true;
+  renderCalc();
 }
 
-window.addEventListener("pointerup", endCalcDrag);
-window.addEventListener("pointercancel", endCalcDrag);
+function pressAc() {
+  resetDesk();
+  if (calcEntry) calcEntry.value = "0";
+  renderCalc();
+}
+
+function pressBk() {
+  if (desk.fresh) return;
+  desk.entry = desk.entry.slice(0, -1);
+  if (!desk.entry) desk.fresh = true;
+  renderCalc();
+}
+
+calcList.addEventListener("click", async (event) => {
+  const remove = event.target.closest("[data-remove]");
+  if (remove) {
+    const ok = await askConfirm("Remove this calculation?", "Remove");
+    if (!ok) return;
+    state.calc = state.calc.filter((item) => item.id !== remove.dataset.remove);
+    persist();
+    renderCalc();
+    return;
+  }
+  const row = event.target.closest(".tape-row");
+  if (!row) return;
+  const item = state.calc.find((entry) => entry.id === row.dataset.id);
+  if (!item) return;
+  setCalcKind(item.kind, true);
+  desk.acc = item.value;
+  desk.op = null;
+  desk.entry = formatCalc(item.kind, item.value, state.precision);
+  desk.expr = item.expr;
+  desk.fresh = true;
+  renderCalc();
+});
 
 function escapeHtml(value) {
   return String(value)
@@ -720,7 +779,7 @@ document.getElementById("clear-bank").addEventListener("click", async () => {
 });
 
 document.getElementById("clear-calc").addEventListener("click", async () => {
-  const ok = await askConfirm("Clear every value in Calculator?", "Clear");
+  const ok = await askConfirm("Clear recent calculations?", "Clear");
   if (!ok) return;
   state.calc = [];
   persist();
@@ -750,94 +809,93 @@ function setTab(tab) {
   document.getElementById("view-triangle").hidden = tab !== "triangle";
   document.getElementById("view-combine").hidden = tab !== "combine";
   document.getElementById("view-pipe").hidden = tab !== "pipe";
+  document.getElementById("view-distance").hidden = tab !== "distance";
   if (tab === "triangle") refresh();
   if (tab === "combine") renderCalc();
   if (tab === "pipe") renderPipe(true);
+  if (tab === "distance") renderDistance();
 }
 
 document.querySelectorAll(".tab").forEach((btn) => {
   btn.addEventListener("click", () => setTab(btn.dataset.tab));
 });
 
-function setComposeKind(kind) {
-  state.composeKind = kind === "angle" ? "angle" : "length";
-  document.querySelectorAll(".kind").forEach((el) => {
-    el.setAttribute("aria-pressed", String(el.dataset.kind === state.composeKind));
+if (distFromEl) {
+  distFromEl.addEventListener("change", () => {
+    state.distFrom = distFromEl.value;
+    persist();
+    renderDistance();
   });
-  composeValue.placeholder = state.composeKind === "length" ? "12 3/8 or 145" : "45";
-  composeValue.setAttribute("inputmode", state.composeKind === "length" ? "text" : "decimal");
-  if (composeUnit) composeUnit.textContent = state.composeKind === "length" ? "in" : "°";
-  updateComposePreview();
+}
+if (distToEl) {
+  distToEl.addEventListener("change", () => {
+    state.distTo = distToEl.value;
+    persist();
+    renderDistance();
+  });
+}
+if (distSwap) {
+  distSwap.addEventListener("click", () => {
+    const a = state.distFrom;
+    state.distFrom = state.distTo;
+    state.distTo = a;
+    persist();
+    renderDistance();
+  });
+}
+if (distFromList) {
+  distFromList.addEventListener("click", (event) => {
+    const row = event.target.closest("[data-dist-to]");
+    if (!row) return;
+    state.distTo = row.dataset.distTo;
+    persist();
+    renderDistance();
+  });
+}
+
+function setCalcKind(kind, keep = false) {
+  const next = kind === "angle" ? "angle" : "length";
+  if (next !== desk.kind && !keep) resetDesk();
+  desk.kind = next;
+  if (calcEntry) calcEntry.setAttribute("inputmode", next === "length" ? "text" : "decimal");
+  renderDesk();
 }
 
 document.querySelectorAll(".kind").forEach((btn) => {
-  btn.addEventListener("click", () => setComposeKind(btn.dataset.kind));
+  btn.addEventListener("click", () => setCalcKind(btn.dataset.kind));
 });
 
-function addCompose() {
-  const raw = composeValue.value.trim();
-  const kind = state.composeKind;
-  const parsed = kind === "length" ? parseLength(raw) : parseAngle(raw);
-  if (parsed.empty || parsed.error) {
-    toast(parsed.error || "Enter a measurement.");
-    return;
+calcPad.addEventListener("click", (event) => {
+  const btn = event.target.closest("button");
+  if (!btn) return;
+  if (btn.dataset.act === "ac") pressAc();
+  else if (btn.dataset.act === "bk") pressBk();
+  else if (btn.dataset.act === "eq") pressEquals();
+  else if (btn.dataset.op) pressOp(btn.dataset.op);
+  else if (btn.dataset.key != null) {
+    typeKey(btn.dataset.key);
+    if (calcEntry) calcEntry.value = desk.entry || "0";
+    renderCalc();
   }
-  const value = kind === "length" ? parsed.inches : parsed.degrees;
-  if (state.calc.length && state.calc[0].kind !== kind) {
-    toast(
-      kind === "angle"
-        ? "Calculator is using lengths. Clear it before adding an angle."
-        : "Calculator is using angles. Clear it before adding a length."
-    );
-    return;
-  }
-  const name =
-    composeName.value.trim() ||
-    (kind === "length"
-      ? lengthConversions(value, state.precision).fractionalInches
-      : angleConversions(value).degrees);
-  state.calc.push({
-    id: crypto.randomUUID(),
-    name,
-    kind,
-    value,
-    op: state.calc.length ? "+" : null,
-  });
-  persist();
-  composeValue.value = "";
-  updateComposePreview();
-  renderCalc();
-  toast("Added to Calculator");
-}
-
-function updateComposePreview() {
-  if (!composeConv) return;
-  const raw = composeValue.value.trim();
-  if (!raw) {
-    composeConv.textContent = "";
-    return;
-  }
-  const parsed = state.composeKind === "length" ? parseLength(raw) : parseAngle(raw);
-  if (parsed.empty || parsed.error) {
-    composeConv.textContent = parsed.error || "";
-    return;
-  }
-  composeConv.textContent =
-    state.composeKind === "length"
-      ? lengthConvLine(parsed.inches)
-      : angleConvLine(parsed.degrees);
-}
-
-composeValue.addEventListener("input", updateComposePreview);
-
-document.getElementById("compose-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  addCompose();
 });
 
-document.getElementById("compose-add").addEventListener("click", (event) => {
-  event.preventDefault();
-  addCompose();
+calcEntry.addEventListener("input", () => {
+  desk.entry = calcEntry.value;
+  desk.fresh = false;
+  if (calcConv) calcConv.textContent = deskConvText();
+});
+
+calcEntry.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    pressEquals();
+  }
+});
+
+calcEntry.addEventListener("focus", () => {
+  if (desk.fresh && (!desk.entry || calcEntry.value === "0")) {
+    calcEntry.select();
+  }
 });
 
 function miterLine(step) {
@@ -1069,6 +1127,85 @@ function renderPipeList(parsed) {
     .join("");
 }
 
+function setPickDist(on) {
+  pickDist = Boolean(on);
+  if (!pickDist) pickIds = [];
+  if (distPickBtn) distPickBtn.setAttribute("aria-pressed", String(pickDist));
+  if (pipeWorkspace) pipeWorkspace.classList.toggle("is-picking", pickDist);
+  renderPipe(false);
+}
+
+function pickStation(id) {
+  if (!pickDist || !id) return;
+  if (pickIds.includes(id)) {
+    pickIds = [];
+    renderPipe(false);
+    return;
+  }
+  if (!pickIds.length) {
+    pickIds = [id];
+    renderPipe(false);
+    return;
+  }
+  state.distFrom = pickIds[0];
+  state.distTo = id;
+  pickDist = false;
+  pickIds = [];
+  if (distPickBtn) distPickBtn.setAttribute("aria-pressed", "false");
+  if (pipeWorkspace) pipeWorkspace.classList.remove("is-picking");
+  persist();
+  setTab("distance");
+}
+
+function pipeView() {
+  return {
+    zoom: Math.max(0.4, Math.min(8, Number(state.pipe.zoom) || 1)),
+    panX: Number.isFinite(state.pipe.panX) ? state.pipe.panX : 0,
+    panY: Number.isFinite(state.pipe.panY) ? state.pipe.panY : 0,
+  };
+}
+
+function pipeViewOffFrame() {
+  const view = pipeView();
+  return Math.abs(view.zoom - 1) > 0.03 || Math.hypot(view.panX, view.panY) > 8;
+}
+
+function syncPipeFrameBtn() {
+  if (pipeRecenter) pipeRecenter.hidden = !pipeViewOffFrame();
+}
+
+function applyPipeView(next, save = false) {
+  state.pipe.zoom = next.zoom;
+  state.pipe.panX = next.panX;
+  state.pipe.panY = next.panY;
+  renderPipePreview(parsedPipeSteps());
+  if (save) persist();
+}
+
+function zoomPipeFrom(view, sx, sy, nextZoom) {
+  const z0 = view.zoom;
+  const z1 = Math.max(0.4, Math.min(8, nextZoom));
+  if (Math.abs(z1 - z0) < 1e-6) {
+    return { zoom: z1, panX: view.panX, panY: view.panY };
+  }
+  const k = z1 / z0;
+  const w = Math.max(320, pipeWorkspace.clientWidth);
+  const h = Math.max(320, pipeWorkspace.clientHeight);
+  return {
+    zoom: z1,
+    panX: (1 - k) * (sx - w / 2) + k * view.panX,
+    panY: (1 - k) * (sy - h / 2) + k * view.panY,
+  };
+}
+
+function zoomPipeAt(sx, sy, nextZoom) {
+  return zoomPipeFrom(pipeView(), sx, sy, nextZoom);
+}
+
+function recenterPipe() {
+  applyPipeView({ zoom: 1, panX: 0, panY: 0 }, true);
+}
+
 function renderPipePreview(parsed) {
   const od = parsed.od > 0 ? parsed.od : 0;
   const first = state.pipe.steps[0];
@@ -1080,14 +1217,25 @@ function renderPipePreview(parsed) {
   });
   const msgs = [...parsed.errors, ...model.errors];
   pipeMsg.textContent = msgs[0] || "";
-  pipeStatus.textContent = msgs[0]
-    ? msgs[0]
-    : "Drag the cage to turn it. Clock rolls around the incoming pipe. Start rotation tilts from the ground.";
+  if (msgs[0]) {
+    pipeStatus.textContent = msgs[0];
+  } else if (pickDist) {
+    pipeStatus.textContent = pickIds.length
+      ? `Point ${pickIds[0]} selected. Tap a second point, or tap ${pickIds[0]} again to cancel.`
+      : "Tap the first named point on the cage.";
+  } else {
+    pipeStatus.textContent =
+      "One finger turns · two fingers move · pinch to zoom.";
+  }
 
   const w = Math.max(320, pipeWorkspace.clientWidth);
   const h = Math.max(320, pipeWorkspace.clientHeight);
   pipeSvg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  const laid = layoutPipePath(model, w, h, state.pipe.yaw, state.pipe.pitch, 20, od);
+  const laid = layoutPipePath(model, w, h, state.pipe.yaw, state.pipe.pitch, 20, od, {
+    zoom: state.pipe.zoom,
+    panX: state.pipe.panX,
+    panY: state.pipe.panY,
+  });
   const px = laid.scale || 1;
   const outline = 1.5;
   const stroke = Math.max(outline, od * px);
@@ -1102,6 +1250,18 @@ function renderPipePreview(parsed) {
       const r = m.kind === "start" || m.kind === "end" ? dotR : Math.max(1.25, Math.min(dotR * 0.45, 3));
       const cls = m.kind === "end" ? "pipe-dot end" : "pipe-dot";
       return `<circle class="${cls}" cx="${m.x}" cy="${m.y}" r="${r}" />`;
+    })
+    .join("");
+  const stationMarks = (laid.stations || [])
+    .map((s) => {
+      const r = Math.max(pickDist ? 12 : 8, Math.min(pickDist ? 15 : 11, dotR + (pickDist ? 5 : 2)));
+      const hit = pickDist ? 26 : 18;
+      const picked = pickDist && pickIds.includes(s.id);
+      return `<g class="station${picked ? " is-picked" : ""}" data-station="${escapeHtml(s.id)}" transform="translate(${Number(s.x).toFixed(1)} ${Number(s.y).toFixed(1)})">
+        <circle class="station-hit" r="${hit}" />
+        <circle class="station-halo" r="${r.toFixed(1)}" />
+        <text class="station-lab" dy="0.35em">${escapeHtml(s.name)}</text>
+      </g>`;
     })
     .join("");
 
@@ -1164,8 +1324,9 @@ function renderPipePreview(parsed) {
     ? `<path class="floor-fill" d="${laid.floor.fill}" /><path class="floor-grid" d="${laid.floor.grid}" /><path class="floor-edge" d="${laid.floor.edge}" />`
     : "";
   pipeSvg.innerHTML = laid.d
-    ? `${floor}${leaders}<path class="tube" d="${laid.d}" style="stroke-width:${stroke.toFixed(2)}" />${inner > 0.25 ? `<path class="tube-soft" d="${laid.d}" style="stroke-width:${inner.toFixed(2)}" />` : ""}${dots}`
+    ? `${floor}${leaders}<path class="tube" d="${laid.d}" style="stroke-width:${stroke.toFixed(2)}" />${inner > 0.25 ? `<path class="tube-soft" d="${laid.d}" style="stroke-width:${inner.toFixed(2)}" />` : ""}${dots}${stationMarks}`
     : `${floor}${leaders}`;
+  syncPipeFrameBtn();
 
   if (msgs.length) {
     pipeResult.innerHTML = `<p class="err">${msgs[0]}</p>`;
@@ -1205,6 +1366,81 @@ function renderPipe(rebuildList = false) {
     renderPipeList(parsed);
   }
   renderPipePreview(parsed);
+  renderDistance();
+}
+
+function currentStations() {
+  const parsed = parsedPipeSteps();
+  const od = parsed.od > 0 ? parsed.od : 0;
+  const first = state.pipe.steps[0];
+  const firstTurn = first?.type === "bend" || first?.type === "joint";
+  const model = buildPipe(parsed.clr || 3, parsed.steps, od, {
+    angle: parsed.startAngle || 0,
+    rotation: firstTurn ? parsed.startRot || 0 : 0,
+    firstBend: firstTurn,
+  });
+  return model.stations || [];
+}
+
+function renderDistance() {
+  if (!distFromEl || !distToEl) return;
+  const stations = currentStations();
+  const ids = new Set(stations.map((s) => s.id));
+  if (!ids.has(state.distFrom)) state.distFrom = stations[0]?.id || "";
+  if (!ids.has(state.distTo)) state.distTo = stations[stations.length - 1]?.id || "";
+  if (stations.length > 1 && state.distFrom === state.distTo) {
+    state.distTo = stations.find((s) => s.id !== state.distFrom)?.id || state.distTo;
+  }
+  const opts = stations.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join("");
+  distFromEl.innerHTML = opts;
+  distToEl.innerHTML = opts;
+  if (state.distFrom) distFromEl.value = state.distFrom;
+  if (state.distTo) distToEl.value = state.distTo;
+  if (distPoints) {
+    distPoints.innerHTML = stations
+      .map((s) => `<li class="dist-row"><span class="dist-id">${escapeHtml(s.name)}</span></li>`)
+      .join("");
+  }
+  const from = stations.find((s) => s.id === state.distFrom);
+  const to = stations.find((s) => s.id === state.distTo);
+  if (distFromEmpty) distFromEmpty.hidden = stations.length > 1;
+  if (!from || !to || from.id === to.id) {
+    if (distResult) {
+      distResult.innerHTML = stations.length < 2 ? `<p class="empty">Need at least two named points on the cage.</p>` : "";
+    }
+    if (distFromList) distFromList.innerHTML = "";
+    return;
+  }
+  const straight = Math.hypot(from.x - to.x, from.y - to.y, from.z - to.z);
+  const along = Math.abs((from.along || 0) - (to.along || 0));
+  const sc = lengthConversions(straight, state.precision);
+  const ac = lengthConversions(along, state.precision);
+  distResult.innerHTML = `<div class="total">
+    <p class="equation">${from.name} to ${to.name}</p>
+    <div class="total-main"><span>Straight-line</span><strong>${sc.fractionalInches}</strong></div>
+    <div class="alts">
+      <span>${sc.feetInches}</span>
+      <span>${sc.decimalInches}</span>
+      <span>${sc.mm}</span>
+    </div>
+    <div class="total-main" style="margin-top:10px"><span>Along pipe</span><strong>${ac.fractionalInches}</strong></div>
+    <div class="alts">
+      <span>${ac.feetInches}</span>
+      <span>${ac.decimalInches}</span>
+      <span>${ac.mm}</span>
+    </div>
+  </div>`;
+  distFromList.innerHTML = stations
+    .filter((s) => s.id !== from.id)
+    .map((s) => {
+      const d = Math.hypot(from.x - s.x, from.y - s.y, from.z - s.z);
+      const conv = lengthConversions(d, state.precision);
+      return `<li class="dist-row" data-dist-to="${s.id}">
+        <span class="dist-id">${from.name}–${s.name}</span>
+        <span class="dist-len">${conv.fractionalInches}</span>
+      </li>`;
+    })
+    .join("");
 }
 
 pipeStepsEl.addEventListener("input", (event) => {
@@ -1352,6 +1588,20 @@ document.getElementById("add-joint").addEventListener("click", () => {
   renderPipe(true);
 });
 
+if (distPickBtn) {
+  distPickBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setPickDist(!pickDist);
+  });
+}
+
+if (pipeRecenter) {
+  pipeRecenter.addEventListener("click", (event) => {
+    event.stopPropagation();
+    recenterPipe();
+  });
+}
+
 document.getElementById("clear-pipe").addEventListener("click", async () => {
   const ok = await askConfirm("Delete every piece in the cage?", "Reset");
   if (!ok) return;
@@ -1360,43 +1610,256 @@ document.getElementById("clear-pipe").addEventListener("click", async () => {
   renderPipe(true);
 });
 
-let pipeDrag = null;
+const pipeHands = new Map();
+let pipeRotate = null;
+let pipeTwo = null;
+let pipeTap = null;
+let pipeBlockRotate = false;
+let pipeZoomSave = 0;
+
+function pipeChromeHit(target) {
+  return target?.closest?.("#dist-pick-btn, #pipe-recenter");
+}
+
 function pipeDragTarget(event) {
   return (
     event.target === pipeWorkspace ||
     event.target === pipeSvg ||
     event.target.closest?.("#pipe") ||
     event.target.closest?.(".tube") ||
-    event.target.closest?.(".tube-soft")
+    event.target.closest?.(".tube-soft") ||
+    event.target.closest?.(".station")
   );
 }
+
+function pipeClientToSvg(clientX, clientY) {
+  const rect = pipeWorkspace.getBoundingClientRect();
+  return pipeWorkspaceToSvg(clientX - rect.left, clientY - rect.top);
+}
+
+function pipePair(points) {
+  const a = points[0];
+  const b = points[1];
+  return {
+    dist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+    mid: pipeClientToSvg((a.x + b.x) / 2, (a.y + b.y) / 2),
+  };
+}
+
+function startPipeTwo(points) {
+  const pose = pipePair(points);
+  const view = pipeView();
+  pipeTwo = { ...pose, zoom: view.zoom, panX: view.panX, panY: view.panY, pinched: false };
+  pipeRotate = null;
+  pipeTap = null;
+  pipeBlockRotate = true;
+  pipeWorkspace.classList.remove("is-drag");
+}
+
+function movePipeTwo(points) {
+  if (!pipeTwo || points.length < 2) return;
+  const pose = pipePair(points);
+  const ratio = pose.dist / pipeTwo.dist;
+  if (!pipeTwo.pinched && Math.abs(ratio - 1) > 0.04) pipeTwo.pinched = true;
+  const zoomed = zoomPipeFrom(
+    { zoom: pipeTwo.zoom, panX: pipeTwo.panX, panY: pipeTwo.panY },
+    pipeTwo.mid.x,
+    pipeTwo.mid.y,
+    pipeTwo.pinched ? pipeTwo.zoom * ratio : pipeTwo.zoom
+  );
+  applyPipeView({
+    zoom: zoomed.zoom,
+    panX: zoomed.panX + (pose.mid.x - pipeTwo.mid.x),
+    panY: zoomed.panY + (pose.mid.y - pipeTwo.mid.y),
+  });
+}
+
+function pipeTouchPoints(event) {
+  return [...event.touches].map((touch) => ({
+    x: touch.clientX,
+    y: touch.clientY,
+    id: touch.identifier,
+  }));
+}
+
+function rotatePipeBy(x, y) {
+  if (!pipeRotate) return;
+  if (Math.hypot(x - pipeRotate.x, y - pipeRotate.y) > 6) pipeRotate.moved = true;
+  state.pipe.yaw = pipeRotate.yaw + (x - pipeRotate.x) * 0.45;
+  state.pipe.pitch = Math.max(-80, Math.min(80, pipeRotate.pitch + (y - pipeRotate.y) * 0.35));
+  pipeWorkspace.classList.add("is-drag");
+  renderPipePreview(parsedPipeSteps());
+}
+
+pipeWorkspace.addEventListener(
+  "touchstart",
+  (event) => {
+    if (pipeChromeHit(event.target)) return;
+    const station = event.target.closest?.("[data-station]");
+    if (pickDist && station && event.touches.length === 1) {
+      const touch = event.touches[0];
+      pipeTap = {
+        id: station.dataset.station,
+        x: touch.clientX,
+        y: touch.clientY,
+        pointerId: touch.identifier,
+      };
+      if (event.cancelable) event.preventDefault();
+      return;
+    }
+    if (event.cancelable) event.preventDefault();
+    const points = pipeTouchPoints(event);
+    if (points.length >= 2) {
+      startPipeTwo(points);
+      return;
+    }
+    if (pipeBlockRotate || !points.length) return;
+    pipeRotate = {
+      x: points[0].x,
+      y: points[0].y,
+      yaw: state.pipe.yaw,
+      pitch: state.pipe.pitch,
+      moved: false,
+    };
+  },
+  { passive: false }
+);
+
+window.addEventListener(
+  "touchmove",
+  (event) => {
+    if (!pipeTwo && !pipeRotate && !pipeTap) return;
+    if (event.cancelable) event.preventDefault();
+    const points = pipeTouchPoints(event);
+    if (points.length >= 2) {
+      if (!pipeTwo) startPipeTwo(points);
+      movePipeTwo(points);
+      return;
+    }
+    if (pipeTap && points.length === 1) {
+      if (Math.hypot(points[0].x - pipeTap.x, points[0].y - pipeTap.y) > 14) pipeTap = null;
+      return;
+    }
+    if (pipeBlockRotate || !pipeRotate || !points.length) return;
+    rotatePipeBy(points[0].x, points[0].y);
+  },
+  { passive: false, capture: true }
+);
+
+function onPipeTouchEnd(event) {
+  if (!pipeTwo && !pipeRotate && !pipeTap && !pipeBlockRotate) return;
+  const points = pipeTouchPoints(event);
+  if (pipeTap && points.length === 0) {
+    const touch = event.changedTouches[0];
+    if (touch && Math.hypot(touch.clientX - pipeTap.x, touch.clientY - pipeTap.y) < 14) {
+      pickStation(pipeTap.id);
+    }
+    pipeTap = null;
+  }
+  if (points.length >= 2) {
+    startPipeTwo(points);
+    return;
+  }
+  pipeTwo = null;
+  pipeRotate = null;
+  pipeWorkspace.classList.remove("is-drag");
+  if (points.length === 0) {
+    pipeBlockRotate = false;
+    persist();
+  }
+}
+
+window.addEventListener("touchend", onPipeTouchEnd, { passive: false, capture: true });
+window.addEventListener("touchcancel", onPipeTouchEnd, { passive: false, capture: true });
+
+["gesturestart", "gesturechange", "gestureend"].forEach((type) => {
+  pipeWorkspace.addEventListener(type, (event) => event.preventDefault());
+});
+
 pipeWorkspace.addEventListener("pointerdown", (event) => {
+  if (event.pointerType === "touch") return;
+  if (pipeChromeHit(event.target)) return;
+  const station = event.target.closest?.("[data-station]");
+  if (pickDist && station) {
+    event.preventDefault();
+    pipeTap = {
+      id: station.dataset.station,
+      x: event.clientX,
+      y: event.clientY,
+      pointerId: event.pointerId,
+    };
+    return;
+  }
   if (event.target.closest?.(".pipe-tag")) return;
   if (!pipeDragTarget(event) && event.target !== pipeWorkspace) return;
-  pipeDrag = { x: event.clientX, y: event.clientY, yaw: state.pipe.yaw, pitch: state.pipe.pitch };
-  pipeWorkspace.classList.add("is-drag");
-  try {
-    pipeWorkspace.setPointerCapture(event.pointerId);
-  } catch {
-    /* ignore */
+  pipeHands.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (pipeHands.size >= 2) {
+    startPipeTwo([...pipeHands.values()]);
+    return;
   }
+  pipeRotate = {
+    x: event.clientX,
+    y: event.clientY,
+    yaw: state.pipe.yaw,
+    pitch: state.pipe.pitch,
+    moved: false,
+  };
 });
+
 window.addEventListener("pointermove", (event) => {
-  if (!pipeDrag) return;
-  state.pipe.yaw = pipeDrag.yaw + (event.clientX - pipeDrag.x) * 0.45;
-  state.pipe.pitch = Math.max(-80, Math.min(80, pipeDrag.pitch + (event.clientY - pipeDrag.y) * 0.35));
-  renderPipePreview(parsedPipeSteps());
+  if (event.pointerType === "touch") return;
+  if (pipeHands.has(event.pointerId)) {
+    pipeHands.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  }
+  if (pipeTwo && pipeHands.size >= 2) {
+    movePipeTwo([...pipeHands.values()]);
+    return;
+  }
+  if (!pipeRotate || pipeBlockRotate) return;
+  rotatePipeBy(event.clientX, event.clientY);
 });
-const endPipeDrag = () => {
-  if (!pipeDrag) return;
-  pipeDrag = null;
-  pipeWorkspace.classList.remove("is-drag");
-  persist();
-};
-window.addEventListener("pointerup", endPipeDrag);
-window.addEventListener("pointercancel", endPipeDrag);
-pipeWorkspace.addEventListener("pointerup", endPipeDrag);
-pipeWorkspace.addEventListener("pointercancel", endPipeDrag);
+
+function endPipePointer(event) {
+  if (event.pointerType === "touch") return;
+  if (endPipePointer._last === event.pointerId && event.timeStamp === endPipePointer._t) return;
+  endPipePointer._last = event.pointerId;
+  endPipePointer._t = event.timeStamp;
+  const tap = pipeTap && pipeTap.pointerId === event.pointerId ? pipeTap : null;
+  pipeHands.delete(event.pointerId);
+  if (tap && Math.hypot(event.clientX - tap.x, event.clientY - tap.y) < 14) {
+    pickStation(tap.id);
+  }
+  if (pipeTap && pipeTap.pointerId === event.pointerId) pipeTap = null;
+  if (pipeHands.size >= 2) {
+    startPipeTwo([...pipeHands.values()]);
+    return;
+  }
+  pipeTwo = null;
+  if (!pipeHands.size) {
+    pipeRotate = null;
+    pipeBlockRotate = false;
+    pipeWorkspace.classList.remove("is-drag");
+    persist();
+  } else {
+    pipeRotate = null;
+    pipeWorkspace.classList.remove("is-drag");
+  }
+}
+
+pipeWorkspace.addEventListener("pointerup", endPipePointer);
+pipeWorkspace.addEventListener("pointercancel", endPipePointer);
+
+pipeWorkspace.addEventListener(
+  "wheel",
+  (event) => {
+    event.preventDefault();
+    const svg = pipeClientToSvg(event.clientX, event.clientY);
+    applyPipeView(zoomPipeAt(svg.x, svg.y, pipeView().zoom * Math.exp(-event.deltaY * 0.0018)));
+    window.clearTimeout(pipeZoomSave);
+    pipeZoomSave = window.setTimeout(() => persist(), 180);
+  },
+  { passive: false }
+);
 
 window.addEventListener("resize", () => {
   if (state.tab === "pipe") renderPipe(false);
@@ -1438,7 +1901,7 @@ async function setupPwa() {
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js?v=38");
+    const reg = await navigator.serviceWorker.register("./sw.js?v=48");
     const ready = await navigator.serviceWorker.ready;
     if (ready.active || reg.active) installBtn.textContent = "Ready";
     navigator.serviceWorker.addEventListener("message", (event) => {

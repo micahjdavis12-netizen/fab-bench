@@ -19,7 +19,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon-192.png" type="image/png" />
     <link rel="apple-touch-icon" href="./icons/icon-180.png" sizes="180x180" />
-    <link rel="stylesheet" href="./css/app.css?v=38" />
+    <link rel="stylesheet" href="./css/app.css?v=48" />
     <style>
       .saved {
         display: grid !important;
@@ -41,7 +41,7 @@
     </style>
     <script>
       (function () {
-        var build = "38";
+        var build = "48";
         var local = location.hostname === "127.0.0.1" || location.hostname === "localhost";
         var seen = localStorage.getItem("fab-bench-build") === build;
         if (seen && !local) return;
@@ -87,6 +87,7 @@
         <button class="tab" type="button" role="tab" id="tab-combine" data-tab="combine" aria-selected="false" aria-controls="view-combine">Calculator</button>
         <button class="tab" type="button" role="tab" id="tab-triangle" data-tab="triangle" aria-selected="true" aria-controls="view-triangle">Triangle</button>
         <button class="tab" type="button" role="tab" id="tab-pipe" data-tab="pipe" aria-selected="false" aria-controls="view-pipe">Pipe</button>
+        <button class="tab" type="button" role="tab" id="tab-distance" data-tab="distance" aria-selected="false" aria-controls="view-distance">Distance</button>
       </div>
 
       <div class="view" id="view-triangle" role="tabpanel" aria-labelledby="tab-triangle">
@@ -122,41 +123,57 @@
       </div>
 
       <div class="view" id="view-combine" role="tabpanel" aria-labelledby="tab-combine" hidden>
-        <p class="status-bar">Type a length or an angle. Saved triangle values can still be added from Triangle.</p>
+        <p class="status-bar">Shop lengths and angles. Use ' and " for feet and inches.</p>
 
-        <section class="panel" aria-labelledby="compose-title">
-          <div class="panel-head">
-            <h2 id="compose-title">Add a value</h2>
-          </div>
-          <form class="compose" id="compose-form">
-            <div class="kind-toggle" role="group" aria-label="Value type">
-              <button class="kind" type="button" data-kind="length" aria-pressed="true">Length</button>
-              <button class="kind" type="button" data-kind="angle" aria-pressed="false">Angle</button>
-            </div>
-            <label>
-              Name
-              <input id="compose-name" maxlength="80" autocomplete="off" placeholder="Header bar" />
-            </label>
-            <label>
-              Value
-              <div class="unit-field">
-                <input id="compose-value" required autocomplete="off" inputmode="text" placeholder="12 3/8 or 145" />
-                <span class="unit" id="compose-unit">in</span>
-              </div>
-              <p class="conv" id="compose-conv"></p>
-            </label>
-            <button class="solid" id="compose-add" type="button">Add to Calculator</button>
-          </form>
-        </section>
-
-        <section class="panel" aria-labelledby="calc-title">
+        <section class="panel calc-shell" aria-labelledby="calc-title">
           <div class="panel-head">
             <h2 id="calc-title">Calculator</h2>
+          </div>
+          <div class="kind-toggle" role="group" aria-label="Value type">
+            <button class="kind" type="button" data-kind="length" aria-pressed="true">Length</button>
+            <button class="kind" type="button" data-kind="angle" aria-pressed="false">Angle</button>
+          </div>
+          <div class="calc-display">
+            <p class="calc-expr" id="calc-expr"></p>
+            <div class="calc-readout">
+              <input id="calc-entry" autocomplete="off" inputmode="text" aria-label="Calculator value" value="0" />
+              <span class="unit" id="calc-unit">in</span>
+            </div>
+            <p class="conv" id="calc-conv"></p>
+          </div>
+          <div class="calc-pad" id="calc-pad">
+            <button class="calc-key fn" type="button" data-act="ac">AC</button>
+            <button class="calc-key fn" type="button" data-act="bk" aria-label="Backspace">⌫</button>
+            <button class="calc-key fn" type="button" data-key="/" aria-label="Fraction slash">/</button>
+            <button class="calc-key op" type="button" data-op="/">÷</button>
+            <button class="calc-key" type="button" data-key="7">7</button>
+            <button class="calc-key" type="button" data-key="8">8</button>
+            <button class="calc-key" type="button" data-key="9">9</button>
+            <button class="calc-key op" type="button" data-op="*">×</button>
+            <button class="calc-key" type="button" data-key="4">4</button>
+            <button class="calc-key" type="button" data-key="5">5</button>
+            <button class="calc-key" type="button" data-key="6">6</button>
+            <button class="calc-key op" type="button" data-op="-">−</button>
+            <button class="calc-key" type="button" data-key="1">1</button>
+            <button class="calc-key" type="button" data-key="2">2</button>
+            <button class="calc-key" type="button" data-key="3">3</button>
+            <button class="calc-key op" type="button" data-op="+">+</button>
+            <button class="calc-key wide" type="button" data-key="0">0</button>
+            <button class="calc-key" type="button" data-key=".">.</button>
+            <button class="calc-key eq" type="button" data-act="eq">=</button>
+            <button class="calc-key fn wide" type="button" data-key=" " aria-label="Space">space</button>
+            <button class="calc-key fn" type="button" data-key="'" aria-label="Feet">'</button>
+            <button class="calc-key fn" type="button" data-key="&quot;" aria-label="Inches">"</button>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="recent-title">
+          <div class="panel-head">
+            <h2 id="recent-title">Recent</h2>
             <button class="text-btn" type="button" id="clear-calc">Clear</button>
           </div>
-          <p class="empty" id="calc-empty">Add a length or an angle to start a running total. Drag a value to reorder.</p>
+          <p class="empty" id="calc-empty">Equals saves the last calculation here.</p>
           <ol class="calc-list" id="calc-list"></ol>
-          <div class="result" id="calc-result" aria-live="polite"></div>
         </section>
       </div>
 
@@ -167,6 +184,8 @@
           <svg id="pipe" viewBox="0 0 400 420" role="img" aria-label="Bent pipe centerline"></svg>
           <p class="diagram-msg" id="pipe-msg"></p>
           <div class="controls" id="pipe-chips"></div>
+          <button class="glass compact pipe-frame-btn" type="button" id="pipe-recenter" hidden>Re-center</button>
+          <button class="glass compact pipe-dist-btn" type="button" id="dist-pick-btn" aria-pressed="false">Distance between</button>
         </section>
 
         <section class="panel" aria-labelledby="pipe-setup-title">
@@ -208,6 +227,41 @@
 
         <div class="result" id="pipe-result" aria-live="polite"></div>
       </div>
+
+      <div class="view" id="view-distance" role="tabpanel" aria-labelledby="tab-distance" hidden>
+        <p class="status-bar">Points are named along the cage. Straight-line is through space. Centerline follows the pipe.</p>
+
+        <section class="panel" aria-labelledby="dist-title">
+          <div class="panel-head">
+            <h2 id="dist-title">Find distance between</h2>
+          </div>
+          <div class="dist-pick">
+            <label>From
+              <select id="dist-from" aria-label="From point"></select>
+            </label>
+            <button class="icon-btn dist-swap" type="button" id="dist-swap" aria-label="Swap points">⇄</button>
+            <label>To
+              <select id="dist-to" aria-label="To point"></select>
+            </label>
+          </div>
+          <div class="result" id="dist-result" aria-live="polite"></div>
+        </section>
+
+        <section class="panel" aria-labelledby="dist-from-title">
+          <div class="panel-head">
+            <h2 id="dist-from-title">From this point</h2>
+          </div>
+          <p class="empty" id="dist-from-empty">Add pieces to the cage to name points.</p>
+          <ul class="dist-list" id="dist-from-list"></ul>
+        </section>
+
+        <section class="panel" aria-labelledby="dist-points-title">
+          <div class="panel-head">
+            <h2 id="dist-points-title">Points</h2>
+          </div>
+          <ul class="dist-list" id="dist-points"></ul>
+        </section>
+      </div>
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -236,6 +290,6 @@
       </div>
     </dialog>
 
-    <script type="module" src="./js/app.js?v=38"></script>
+    <script type="module" src="./js/app.js?v=48"></script>
   </body>
 </html>
