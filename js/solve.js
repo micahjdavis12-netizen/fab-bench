@@ -402,12 +402,12 @@ export function placeAttachedChips(pts, box, bounds, gap = 14) {
       for (let j = i + 1; j < order.length; j += 1) {
         const a = placed[order[i]];
         const b = placed[order[j]];
-        if (!boxesOverlap(asRect(a), asRect(b), 10)) continue;
+        if (!boxesOverlap(asRect(a), asRect(b), 16)) continue;
         const oxp = a.cx - b.cx;
         const oyp = a.cy - b.cy;
         const d = Math.hypot(oxp, oyp) || 0.01;
-        const overlapX = (box.w + 10 - Math.abs(oxp)) / 2;
-        const overlapY = (box.h + 10 - Math.abs(oyp)) / 2;
+        const overlapX = (box.w + 16 - Math.abs(oxp)) / 2;
+        const overlapY = (box.h + 16 - Math.abs(oyp)) / 2;
         const push = Math.max(overlapX, overlapY, 4) / 2;
         const alongA = clamp(a.cx + a.dx * push * 1.4, a.cy + a.dy * push * 1.4);
         const alongB = clamp(b.cx + b.dx * push * 1.4, b.cy + b.dy * push * 1.4);

@@ -201,15 +201,20 @@ button {
   pointer-events: none;
 }
 
+.view:not([hidden]) {
+  display: grid;
+  gap: 16px;
+}
+
 .measure {
   position: absolute;
-  width: 124px;
+  width: 152px;
   pointer-events: auto;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 1px;
-  padding: 6px 6px 6px 10px;
+  gap: 2px;
+  padding: 7px 7px 8px 10px;
   border-radius: 16px;
   transform: translate(-50%, -50%);
   z-index: 2;
@@ -239,6 +244,47 @@ button {
   font-weight: 600;
   letter-spacing: -0.03em;
   outline: none;
+}
+
+.measure-row .unit {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.conv {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+
+.unit-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--paper);
+  border-radius: 16px;
+  padding-right: 12px;
+}
+
+.unit-field input {
+  background: transparent !important;
+}
+
+.unit-field .unit {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.pipe-lab {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  pointer-events: none;
 }
 
 .measure.is-calc input {
@@ -484,7 +530,7 @@ button {
 .cage-list {
   list-style: none;
   display: grid;
-  gap: 8px;
+  gap: 16px;
 }
 
 .cage-card {
@@ -644,12 +690,38 @@ button {
 
 .tape-row {
   display: grid;
-  grid-template-columns: 36px 1fr auto 36px;
+  grid-template-columns: 36px minmax(0, 1fr) auto 36px;
   gap: 8px;
   align-items: center;
-  min-height: 48px;
+  min-height: 56px;
   border-bottom: 1px solid var(--line);
-  padding: 6px 0;
+  padding: 8px 0;
+}
+
+.tape-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reorder {
+  display: grid;
+  gap: 2px;
+}
+
+.reorder button {
+  width: 28px;
+  height: 20px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--select-soft);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.reorder button:disabled {
+  opacity: 0.28;
 }
 
 .tape-name {

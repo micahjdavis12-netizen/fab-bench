@@ -76,6 +76,7 @@ export function projectPoint(p, yaw, pitch) {
 export function buildPipe(clr, steps) {
   const pts = [];
   const marks = [];
+  const labels = [];
   let pos = v(0, 0, 0);
   let T = v(1, 0, 0);
   let N = v(0, 0, 1);
@@ -95,6 +96,12 @@ export function buildPipe(clr, steps) {
       }
       developed += len;
       const next = add(pos, scale(T, len));
+      const n = labels.filter((item) => item.kind === "straight").length + 1;
+      labels.push({
+        kind: "straight",
+        text: `Straight ${n}`,
+        at: add(pos, scale(T, len / 2)),
+      });
       pts.push({ ...next, kind: "straight" });
       pos = next;
       marks.push({ ...pos, kind: "joint" });
@@ -132,6 +139,11 @@ export function buildPipe(clr, steps) {
     pos = add(C, rot(rel0, N, angle));
     developed += radius * Math.abs((angle * Math.PI) / 180);
     bendCount += 1;
+    labels.push({
+      kind: "bend",
+      text: `Bend ${bendCount}`,
+      at: add(C, rot(rel0, N, angle / 2)),
+    });
     marks.push({ ...pos, kind: "bend" });
   });
 
@@ -141,6 +153,7 @@ export function buildPipe(clr, steps) {
   return {
     pts,
     marks,
+    labels,
     developed,
     bendCount,
     end: pos,
@@ -173,8 +186,13 @@ function boundingSpan(pts) {
 export function layoutPipePath(model, width, height, yaw, pitch, pad = 36) {
   const projected = model.pts.map((p) => projectPoint(p, yaw, pitch));
   const marks = model.marks.map((p) => projectPoint(p, yaw, pitch));
+  const labels = (model.labels || []).map((item) => ({
+    ...projectPoint(item.at, yaw, pitch),
+    text: item.text,
+    kind: item.kind,
+  }));
   if (!projected.length) {
-    return { d: "", marks: [], width, height };
+    return { d: "", marks: [], labels: [], width, height };
   }
   let minX = Infinity;
   let minY = Infinity;
@@ -199,6 +217,7 @@ export function layoutPipePath(model, width, height, yaw, pitch, pad = 36) {
   return {
     d,
     marks: marks.map((p, i) => ({ ...map(p), kind: model.marks[i].kind })),
+    labels: labels.map((item) => ({ ...map(item), text: item.text, kind: item.kind })),
     width,
     height,
   };

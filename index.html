@@ -19,7 +19,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon-192.png" type="image/png" />
     <link rel="apple-touch-icon" href="./icons/icon-180.png" sizes="180x180" />
-    <link rel="stylesheet" href="./css/app.css?v=20" />
+    <link rel="stylesheet" href="./css/app.css?v=21" />
     <style>
       .saved {
         display: grid !important;
@@ -41,7 +41,7 @@
     </style>
     <script>
       (function () {
-        var build = "20";
+        var build = "21";
         var local = location.hostname === "127.0.0.1" || location.hostname === "localhost";
         var seen = localStorage.getItem("fab-bench-build") === build;
         if (seen && !local) return;
@@ -84,8 +84,8 @@
       </header>
 
       <div class="tabs" role="tablist" aria-label="Fab Bench tools">
+        <button class="tab" type="button" role="tab" id="tab-combine" data-tab="combine" aria-selected="false" aria-controls="view-combine">Calculator</button>
         <button class="tab" type="button" role="tab" id="tab-triangle" data-tab="triangle" aria-selected="true" aria-controls="view-triangle">Triangle</button>
-        <button class="tab" type="button" role="tab" id="tab-combine" data-tab="combine" aria-selected="false" aria-controls="view-combine">Combine</button>
         <button class="tab" type="button" role="tab" id="tab-pipe" data-tab="pipe" aria-selected="false" aria-controls="view-pipe">Pipe</button>
       </div>
 
@@ -139,18 +139,22 @@
             </label>
             <label>
               Value
-              <input id="compose-value" required autocomplete="off" inputmode="text" placeholder="12 3/8" />
+              <div class="unit-field">
+                <input id="compose-value" required autocomplete="off" inputmode="text" placeholder="12 3/8" />
+                <span class="unit" id="compose-unit">in</span>
+              </div>
+              <p class="conv" id="compose-conv"></p>
             </label>
-            <button class="solid" type="submit">Add to Combine</button>
+            <button class="solid" type="submit">Add to Calculator</button>
           </form>
         </section>
 
         <section class="panel" aria-labelledby="calc-title">
           <div class="panel-head">
-            <h2 id="calc-title">Combine</h2>
+            <h2 id="calc-title">Calculator</h2>
             <button class="text-btn" type="button" id="clear-calc">Clear</button>
           </div>
-          <p class="empty" id="calc-empty">Add a length or angle to start a running total.</p>
+          <p class="empty" id="calc-empty">Add a length or angle to start a running total. Use the arrows to reorder.</p>
           <ol class="calc-list" id="calc-list"></ol>
           <div class="result" id="calc-result" aria-live="polite"></div>
         </section>
@@ -170,7 +174,11 @@
           </div>
           <label class="field">
             Centerline radius
-            <input id="pipe-clr" autocomplete="off" inputmode="text" placeholder="3" />
+            <div class="unit-field">
+              <input id="pipe-clr" autocomplete="off" inputmode="text" placeholder="3" />
+              <span class="unit">in</span>
+            </div>
+            <p class="conv" id="pipe-clr-conv"></p>
           </label>
         </section>
 
@@ -207,6 +215,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="./js/app.js?v=20"></script>
+    <script type="module" src="./js/app.js?v=21"></script>
   </body>
 </html>

@@ -6,16 +6,16 @@ import {
   parseAngle,
   parseDegrees,
   parseLength,
-} from "./parse.js?v=20";
+} from "./parse.js?v=21";
 import {
   controlAnchors,
   evaluateCalculation,
   layoutTriangle,
   placeAttachedChips,
   solveTriangle,
-} from "./solve.js?v=20";
-import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=20";
-import { loadState, saveState } from "./storage.js?v=20";
+} from "./solve.js?v=21";
+import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=21";
+import { loadState, saveState } from "./storage.js?v=21";
 
 const KEYS = ["a", "b", "c", "A", "B", "C"];
 const SIDE_KEYS = ["a", "b", "c"];
@@ -55,10 +55,11 @@ const pipeResult = document.getElementById("pipe-result");
 const pipeMsg = document.getElementById("pipe-msg");
 const pipeStatus = document.getElementById("pipe-status");
 const pipeClr = document.getElementById("pipe-clr");
-const composeName = document.getElementById("compose-name");
-const composeValue = document.getElementById("compose-value");
+const composeUnit = document.getElementById("compose-unit");
+const composeConv = document.getElementById("compose-conv");
+const pipeClrConv = document.getElementById("pipe-clr-conv");
 
-const TAB_LABEL = { triangle: "Triangle", combine: "Combine", pipe: "Pipe" };
+const TAB_LABEL = { triangle: "Triangle", combine: "Calculator", pipe: "Pipe" };
 
 const stored = loadState(defaultPipe);
 
@@ -232,7 +233,7 @@ function svgToWorkspace(x, y) {
 function placeControls(layout) {
   const { w, h } = viewSize();
   return {
-    boxes: placeAttachedChips(layout, { w: 124, h: 58 }, { w, h, pad: 4 }, 16),
+    boxes: placeAttachedChips(layout, { w: 152, h: 82 }, { w, h, pad: 4 }, 28),
   };
 }
 
@@ -250,7 +251,7 @@ function viewSize() {
   const w = Math.max(320, workspace.clientWidth);
   const h = Math.max(320, workspace.clientHeight);
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  return { w, h, pad: Math.max(96, Math.min(w, h) * 0.26) };
+  return { w, h, pad: Math.max(112, Math.min(w, h) * 0.3) };
 }
 
 function renderControls(ready) {
@@ -258,21 +259,23 @@ function renderControls(ready) {
   const { w, h, pad } = viewSize();
   const layout = layoutTriangle(shape.a, shape.b, shape.c, w, h, pad);
   const placed = placeControls(layout);
-  if (controlsEl.dataset.ready !== "2") {
+  if (controlsEl.dataset.ready !== "3") {
     controlsEl.innerHTML = KEYS.map(
       (key) => `
       <div class="measure glass" data-key="${key}">
-        <label class="lab" for="in-${key}">${LABELS[key]}</label>
+        <label class="lab" for="in-${key}">${LABELS[key]} · ${SIDE_KEYS.includes(key) ? "in" : "deg"}</label>
         <div class="measure-row">
           <input id="in-${key}" data-key="${key}" autocomplete="off" spellcheck="false"
             inputmode="${SIDE_KEYS.includes(key) ? "text" : "decimal"}"
-            aria-label="${LABELS[key]}" placeholder="${SIDE_KEYS.includes(key) ? "12 3/8" : "45"}"
+            aria-label="${LABELS[key]}" placeholder="${SIDE_KEYS.includes(key) ? "12 3/8 in" : "45 deg"}"
             title="${SIDE_KEYS.includes(key) ? "Side length. Try 12 3/8 or 250 mm." : "Angle in degrees."}" />
+          <span class="unit">${SIDE_KEYS.includes(key) ? "in" : "°"}</span>
           <button class="glass plus" type="button" data-save="${key}" aria-label="Save ${LABELS[key]}" title="Save ${LABELS[key]}" disabled>+</button>
         </div>
+        <p class="conv" hidden></p>
       </div>`
     ).join("");
-    controlsEl.dataset.ready = "2";
+    controlsEl.dataset.ready = "3";
     controlsEl.querySelectorAll("input").forEach((input) => {
       input.addEventListener("focus", () => {
         input.closest(".measure").classList.add("is-on");
@@ -298,11 +301,21 @@ function renderControls(ready) {
     const pixel = svgToWorkspace(box.cx, box.cy);
     el.style.left = `${pixel.x}px`;
     el.style.top = `${pixel.y}px`;
-    el.style.width = "124px";
+    el.style.width = "152px";
     el.classList.toggle("is-user", state.source[key] === "user");
     el.classList.toggle("is-calc", state.source[key] === "calc");
     input.readOnly = state.source[key] === "calc";
     if (document.activeElement !== input) input.value = state.raw[key];
+    const convEl = el.querySelector(".conv");
+    if (state.parsed[key] != null && !state.parseError[key]) {
+      convEl.hidden = false;
+      convEl.textContent = SIDE_KEYS.includes(key)
+        ? lengthConvLine(state.parsed[key])
+        : angleConvLine(state.parsed[key]);
+    } else {
+      convEl.hidden = true;
+      convEl.textContent = "";
+    }
     const save = el.querySelector("[data-save]");
     save.disabled = !ready;
   }
@@ -390,6 +403,18 @@ document.getElementById("save-form").addEventListener("submit", (event) => {
   renderBank();
 });
 
+function lengthConvLine(inches) {
+  if (!Number.isFinite(inches)) return "";
+  const conv = lengthConversions(inches, state.precision);
+  return `${conv.fractionalInches} · ${conv.decimalInches} · ${conv.mm}`;
+}
+
+function angleConvLine(degrees) {
+  if (!Number.isFinite(degrees)) return "";
+  const conv = angleConversions(degrees);
+  return `${conv.degrees} · ${formatDecimal(degrees, 3)} deg · ${conv.radians}`;
+}
+
 function shownValue(item) {
   return item.kind === "length"
     ? lengthConversions(item.value, state.precision).fractionalInches
@@ -410,10 +435,10 @@ function renderBank() {
         <div class="saved-info" style="min-width:0">
           <h3>${escapeHtml(item.name)}</h3>
           <strong>${item.kind === "length" ? conv.fractionalInches : conv.degrees}</strong>
-          <p class="meta">${secondary}</p>
+          <p class="meta">${item.kind === "length" ? lengthConvLine(item.value) : angleConvLine(item.value)}</p>
         </div>
         <div class="saved-actions" style="display:flex;align-items:center;gap:8px">
-          <button class="use" type="button" data-add="${item.id}" aria-label="Add ${escapeHtml(item.name)} to Combine">Add</button>
+          <button class="use" type="button" data-add="${item.id}" aria-label="Add ${escapeHtml(item.name)} to Calculator">Add</button>
           <button class="icon-btn" type="button" data-del="${item.id}" aria-label="Delete ${escapeHtml(item.name)}">×</button>
         </div>
       </li>`;
@@ -438,8 +463,8 @@ function addToCalc(id) {
   if (state.calc.length && state.calc[0].kind !== item.kind) {
     toast(
       item.kind === "angle"
-        ? "Combine is using lengths. Clear it before adding an angle."
-        : "Combine is using angles. Clear it before adding a length."
+        ? "Calculator is using lengths. Clear it before adding an angle."
+        : "Calculator is using angles. Clear it before adding a length."
     );
     return;
   }
@@ -453,7 +478,30 @@ function addToCalc(id) {
   persist();
   setTab("combine");
   renderCalc();
-  toast("Added to Combine");
+  toast("Added to Calculator");
+}
+
+function shownAlt(item) {
+  return item.kind === "length" ? lengthConvLine(item.value) : angleConvLine(item.value);
+}
+
+function normalizeCalcOps() {
+  state.calc.forEach((item, i) => {
+    item.op = i === 0 ? null : item.op || "+";
+  });
+}
+
+function moveCalc(id, dir) {
+  const i = state.calc.findIndex((item) => item.id === id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= state.calc.length) return;
+  const copy = state.calc.slice();
+  const [row] = copy.splice(i, 1);
+  copy.splice(j, 0, row);
+  state.calc = copy;
+  normalizeCalcOps();
+  persist();
+  renderCalc();
 }
 
 function renderCalc() {
@@ -462,14 +510,22 @@ function renderCalc() {
   calcList.innerHTML = state.calc
     .map((item, i) => {
       const shown = shownValue(item);
+      const last = i === state.calc.length - 1;
       return `<li class="tape-row" data-id="${item.id}">
         ${
           i === 0
             ? `<span class="op-slot" aria-hidden="true"></span>`
             : `<button class="op-btn" type="button" data-op="${item.id}" aria-label="Change operation, currently ${OP_MARK[item.op]}" title="Tap to switch +, −, ×, ÷">${OP_MARK[item.op]}</button>`
         }
-        <span class="tape-name">${escapeHtml(item.name)}</span>
-        <span class="tape-val">${shown}</span>
+        <div class="tape-copy">
+          <span class="tape-name">${escapeHtml(item.name)}</span>
+          <span class="tape-val">${shown}</span>
+          <span class="conv">${shownAlt(item)}</span>
+        </div>
+        <div class="reorder">
+          <button type="button" data-move="-1" data-id="${item.id}" aria-label="Move ${escapeHtml(item.name)} up" ${i === 0 ? "disabled" : ""}>↑</button>
+          <button type="button" data-move="1" data-id="${item.id}" aria-label="Move ${escapeHtml(item.name)} down" ${last ? "disabled" : ""}>↓</button>
+        </div>
         <button class="icon-btn" type="button" data-remove="${item.id}" aria-label="Remove ${escapeHtml(item.name)}">×</button>
       </li>`;
     })
@@ -512,6 +568,7 @@ function renderCalc() {
 calcList.addEventListener("click", (event) => {
   const opBtn = event.target.closest("[data-op]");
   const remove = event.target.closest("[data-remove]");
+  const move = event.target.closest("[data-move]");
   if (opBtn) {
     const item = state.calc.find((entry) => entry.id === opBtn.dataset.op);
     if (item) {
@@ -520,6 +577,10 @@ calcList.addEventListener("click", (event) => {
       persist();
       renderCalc();
     }
+    return;
+  }
+  if (move) {
+    moveCalc(move.dataset.id, Number(move.dataset.move));
     return;
   }
   if (remove) {
@@ -599,8 +660,30 @@ document.querySelectorAll(".kind").forEach((btn) => {
     });
     composeValue.placeholder = state.composeKind === "length" ? "12 3/8" : "45";
     composeValue.setAttribute("inputmode", state.composeKind === "length" ? "text" : "decimal");
+    if (composeUnit) composeUnit.textContent = state.composeKind === "length" ? "in" : "°";
+    updateComposePreview();
   });
 });
+
+function updateComposePreview() {
+  if (!composeConv) return;
+  const raw = composeValue.value.trim();
+  if (!raw) {
+    composeConv.textContent = "";
+    return;
+  }
+  const parsed = state.composeKind === "length" ? parseLength(raw) : parseAngle(raw);
+  if (parsed.empty || parsed.error) {
+    composeConv.textContent = parsed.error || "";
+    return;
+  }
+  composeConv.textContent =
+    state.composeKind === "length"
+      ? lengthConvLine(parsed.inches)
+      : angleConvLine(parsed.degrees);
+}
+
+composeValue.addEventListener("input", updateComposePreview);
 
 document.getElementById("compose-form").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -615,8 +698,8 @@ document.getElementById("compose-form").addEventListener("submit", (event) => {
   if (state.calc.length && state.calc[0].kind !== kind) {
     toast(
       kind === "angle"
-        ? "Combine is using lengths. Clear it before adding an angle."
-        : "Combine is using angles. Clear it before adding a length."
+        ? "Calculator is using lengths. Clear it before adding an angle."
+        : "Calculator is using angles. Clear it before adding a length."
     );
     return;
   }
@@ -634,8 +717,9 @@ document.getElementById("compose-form").addEventListener("submit", (event) => {
   });
   persist();
   composeValue.value = "";
+  updateComposePreview();
   renderCalc();
-  toast("Added to Combine");
+  toast("Added to Calculator");
 });
 
 function parsedPipeSteps() {
@@ -685,8 +769,11 @@ function parsedPipeSteps() {
 
 function renderPipe() {
   if (!pipeClr) return;
-  if (document.activeElement !== pipeClr) pipeClr.value = state.pipe.clrRaw;
   const parsed = parsedPipeSteps();
+  if (document.activeElement !== pipeClr) pipeClr.value = state.pipe.clrRaw;
+  if (pipeClrConv) {
+    pipeClrConv.textContent = parsed.clr > 0 ? lengthConvLine(parsed.clr) : "";
+  }
   const model = buildPipe(parsed.clr || 3, parsed.steps);
   const msgs = [...parsed.errors, ...model.errors];
   pipeMsg.textContent = msgs[0] || "";
@@ -705,8 +792,14 @@ function renderPipe() {
       return `<circle class="${cls}" cx="${m.x}" cy="${m.y}" r="${r}" />`;
     })
     .join("");
+  const labs = (laid.labels || [])
+    .map(
+      (item) =>
+        `<text class="pipe-lab" x="${item.x}" y="${item.y}" text-anchor="middle" dy="-8">${escapeHtml(item.text)}</text>`
+    )
+    .join("");
   pipeSvg.innerHTML = laid.d
-    ? `<path class="tube" d="${laid.d}" /><path class="tube-soft" d="${laid.d}" />${dots}`
+    ? `<path class="tube" d="${laid.d}" /><path class="tube-soft" d="${laid.d}" />${dots}${labs}`
     : "";
 
   let straightN = 0;
@@ -719,12 +812,16 @@ function renderPipe() {
         straightN += 1;
         return `<li class="cage-card" data-id="${step.id}">
           <header>
-            <h3>Start / straight ${straightN}</h3>
-            <button class="icon-btn" type="button" data-drop="${step.id}" aria-label="Remove straight">×</button>
+            <h3>Straight ${straightN}</h3>
+            <button class="icon-btn" type="button" data-drop="${step.id}" aria-label="Remove straight ${straightN}">×</button>
           </header>
           <div class="cage-fields single">
             <label>Length
-              <input data-straight="${step.id}" value="${escapeHtml(step.raw)}" placeholder="12" inputmode="text" />
+              <div class="unit-field">
+                <input data-straight="${step.id}" value="${escapeHtml(step.raw)}" placeholder="12" inputmode="text" />
+                <span class="unit">in</span>
+              </div>
+              <p class="conv">${parsed.steps.find((s) => s.id === step.id)?.length ? lengthConvLine(parsed.steps.find((s) => s.id === step.id).length) : ""}</p>
             </label>
           </div>
         </li>`;
@@ -733,14 +830,22 @@ function renderPipe() {
       return `<li class="cage-card" data-id="${step.id}">
         <header>
           <h3>Bend ${bendN}</h3>
-          <button class="icon-btn" type="button" data-drop="${step.id}" aria-label="Remove bend">×</button>
+          <button class="icon-btn" type="button" data-drop="${step.id}" aria-label="Remove bend ${bendN}">×</button>
         </header>
         <div class="cage-fields">
           <label>Angle
-            <input data-angle="${step.id}" value="${escapeHtml(step.angleRaw)}" placeholder="90" inputmode="decimal" />
+            <div class="unit-field">
+              <input data-angle="${step.id}" value="${escapeHtml(step.angleRaw)}" placeholder="90" inputmode="decimal" />
+              <span class="unit">°</span>
+            </div>
+            <p class="conv">${parsed.steps.find((s) => s.id === step.id)?.angle ? angleConvLine(parsed.steps.find((s) => s.id === step.id).angle) : ""}</p>
           </label>
           <label>Rotation
-            <input data-rot="${step.id}" value="${escapeHtml(step.rotRaw)}" placeholder="0" inputmode="decimal" />
+            <div class="unit-field">
+              <input data-rot="${step.id}" value="${escapeHtml(step.rotRaw)}" placeholder="0" inputmode="decimal" />
+              <span class="unit">°</span>
+            </div>
+            <p class="conv">${Number.isFinite(parsed.steps.find((s) => s.id === step.id)?.rotation) ? angleConvLine(parsed.steps.find((s) => s.id === step.id).rotation) : ""}</p>
           </label>
         </div>
       </li>`;
@@ -886,7 +991,7 @@ async function setupPwa() {
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js?v=20");
+    const reg = await navigator.serviceWorker.register("./sw.js?v=21");
     const ready = await navigator.serviceWorker.ready;
     if (ready.active || reg.active) installBtn.textContent = "Ready";
     navigator.serviceWorker.addEventListener("message", (event) => {
