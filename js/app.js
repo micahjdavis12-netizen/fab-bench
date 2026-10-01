@@ -6,7 +6,7 @@ import {
   parseAngle,
   parseDegrees,
   parseLength,
-} from "./parse.js?v=83";
+} from "./parse.js?v=84";
 import {
   controlAnchors,
   evaluateCalculation,
@@ -15,10 +15,10 @@ import {
   placeAttachedChips,
   solveTriangle,
   unit as vecUnit,
-} from "./solve.js?v=83";
-import { pairDistance, solveFitValue, wrapShopAngle } from "./fit.js?v=83";
-import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=83";
-import { loadState, saveState } from "./storage.js?v=83";
+} from "./solve.js?v=84";
+import { pairDistance, solveFitValue, wrapShopAngle } from "./fit.js?v=84";
+import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=84";
+import { loadState, saveState } from "./storage.js?v=84";
 
 const KEYS = ["a", "b", "c", "A", "B", "C"];
 const SIDE_KEYS = ["a", "b", "c"];
@@ -1023,14 +1023,34 @@ function setTab(tab) {
     const el = document.getElementById(id);
     if (!el) return;
     const on = name === tab;
-    el.hidden = !on;
-    if (on && dir) el.dataset.enter = dir;
-    else el.removeAttribute("data-enter");
+    if (!on) {
+      el.hidden = true;
+      el.removeAttribute("data-enter");
+      return;
+    }
+    el.hidden = false;
+    if (dir && motionOk()) {
+      el.removeAttribute("data-enter");
+      void el.offsetWidth;
+      el.dataset.enter = dir;
+    } else {
+      el.removeAttribute("data-enter");
+    }
   });
   document.querySelector(".app")?.classList.toggle("is-calc", tab === "combine");
   if (tab === "triangle") refresh();
   if (tab === "combine") renderCalc();
-  if (tab === "pipe") renderPipe(true);
+  if (tab === "pipe") {
+    const empty = !pipeStepsEl?.childElementCount;
+    if (empty) renderPipe(true);
+    else if (dir && motionOk()) {
+      window.setTimeout(() => {
+        if (state.tab === "pipe") renderPipe(false);
+      }, 320);
+    } else {
+      renderPipe(false);
+    }
+  }
   if (tab === "distance") renderDistance();
 }
 
@@ -2690,7 +2710,7 @@ async function setupPwa() {
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js?v=83");
+    const reg = await navigator.serviceWorker.register("./sw.js?v=84");
     const ready = await navigator.serviceWorker.ready;
     if (ready.active || reg.active) setInstallLabel("Ready");
     navigator.serviceWorker.addEventListener("message", (event) => {
