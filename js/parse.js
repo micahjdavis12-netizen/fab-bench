@@ -193,7 +193,7 @@ export function formatInchesFraction(inches, denom = 16) {
   const prefix = sign < 0 ? "-" : "";
   if (n === 0) return `${prefix}${whole}`;
   if (whole === 0) return `${prefix}${n}/${d}`;
-  return `${prefix}${whole} ${n}/${d}`;
+  return `${prefix}${whole}\u00a0${n}/${d}`;
 }
 
 export function formatFeetInches(inches, denom = 16) {

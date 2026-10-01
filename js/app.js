@@ -6,7 +6,7 @@ import {
   parseAngle,
   parseDegrees,
   parseLength,
-} from "./parse.js?v=48";
+} from "./parse.js?v=68";
 import {
   controlAnchors,
   evaluateCalculation,
@@ -15,9 +15,9 @@ import {
   placeAttachedChips,
   solveTriangle,
   unit as vecUnit,
-} from "./solve.js?v=48";
-import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=48";
-import { loadState, saveState } from "./storage.js?v=48";
+} from "./solve.js?v=68";
+import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=68";
+import { loadState, saveState } from "./storage.js?v=68";
 
 const KEYS = ["a", "b", "c", "A", "B", "C"];
 const SIDE_KEYS = ["a", "b", "c"];
@@ -96,6 +96,8 @@ const pipeResult = document.getElementById("pipe-result");
 const pipeMsg = document.getElementById("pipe-msg");
 const pipeStatus = document.getElementById("pipe-status");
 const pipeChips = document.getElementById("pipe-chips");
+const pipeEngage = document.getElementById("pipe-engage");
+const pipeDone = document.getElementById("pipe-done");
 const pipeClr = document.getElementById("pipe-clr");
 const pipeOd = document.getElementById("pipe-od");
 const pipeClrConv = document.getElementById("pipe-clr-conv");
@@ -107,12 +109,13 @@ const confirmCancel = document.getElementById("confirm-cancel");
 const distFromEl = document.getElementById("dist-from");
 const distToEl = document.getElementById("dist-to");
 const distResult = document.getElementById("dist-result");
-const distFromList = document.getElementById("dist-from-list");
-const distFromEmpty = document.getElementById("dist-from-empty");
-const distPoints = document.getElementById("dist-points");
+const distWork = document.getElementById("dist-work");
+const distWorkPanel = document.getElementById("dist-work-panel");
 const distPickBtn = document.getElementById("dist-pick-btn");
-const distSwap = document.getElementById("dist-swap");
 const pipeRecenter = document.getElementById("pipe-recenter");
+const cageSortBtn = document.getElementById("cage-sort");
+const themeToggle = document.getElementById("theme-toggle");
+const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 
 const TAB_LABEL = { triangle: "Triangle", combine: "Calculator", pipe: "Pipe", distance: "Distance" };
 
@@ -133,6 +136,7 @@ const state = {
   tab: stored.tab,
   distFrom: stored.distFrom || "",
   distTo: stored.distTo || "",
+  theme: stored.theme === "dark" ? "dark" : "light",
   pipe: { ...defaultPipe(), ...stored.pipe },
 };
 
@@ -159,10 +163,31 @@ function persist() {
       tab: state.tab,
       distFrom: state.distFrom,
       distTo: state.distTo,
+      theme: state.theme,
       pipe: state.pipe,
     },
     defaultPipe
   );
+}
+
+function applyTheme(theme) {
+  const next = theme === "dark" ? "dark" : "light";
+  state.theme = next;
+  document.documentElement.setAttribute("data-theme", next);
+  document.documentElement.style.colorScheme = next;
+  if (themeColorMeta) themeColorMeta.content = next === "dark" ? "#161513" : "#eceae4";
+  if (themeToggle) {
+    themeToggle.setAttribute("aria-pressed", String(next === "dark"));
+    themeToggle.setAttribute("aria-label", next === "dark" ? "Use light mode" : "Use dark mode");
+  }
+}
+
+applyTheme(state.theme);
+if (themeToggle) {
+  themeToggle.addEventListener("click", () => {
+    applyTheme(state.theme === "dark" ? "light" : "dark");
+    persist();
+  });
 }
 
 function toast(text) {
@@ -801,6 +826,7 @@ ssaEl.addEventListener("click", (event) => {
 
 function setTab(tab) {
   state.tab = tab;
+  if (tab !== "pipe") setPipeLive(false);
   persist();
   viewLabel.textContent = TAB_LABEL[tab];
   document.querySelectorAll(".tab").forEach((btn) => {
@@ -810,6 +836,7 @@ function setTab(tab) {
   document.getElementById("view-combine").hidden = tab !== "combine";
   document.getElementById("view-pipe").hidden = tab !== "pipe";
   document.getElementById("view-distance").hidden = tab !== "distance";
+  document.querySelector(".app")?.classList.toggle("is-calc", tab === "combine");
   if (tab === "triangle") refresh();
   if (tab === "combine") renderCalc();
   if (tab === "pipe") renderPipe(true);
@@ -830,24 +857,6 @@ if (distFromEl) {
 if (distToEl) {
   distToEl.addEventListener("change", () => {
     state.distTo = distToEl.value;
-    persist();
-    renderDistance();
-  });
-}
-if (distSwap) {
-  distSwap.addEventListener("click", () => {
-    const a = state.distFrom;
-    state.distFrom = state.distTo;
-    state.distTo = a;
-    persist();
-    renderDistance();
-  });
-}
-if (distFromList) {
-  distFromList.addEventListener("click", (event) => {
-    const row = event.target.closest("[data-dist-to]");
-    if (!row) return;
-    state.distTo = row.dataset.distTo;
     persist();
     renderDistance();
   });
@@ -948,14 +957,19 @@ function parsedPipeSteps() {
     const name = isJoint ? `Joint ${jointN}` : `Bend ${bendN}`;
     const ang = parseDegrees(step.angleRaw);
     const rot = step.rotRaw.trim() ? parseDegrees(step.rotRaw) : { degrees: 0 };
+    const jointLen = isJoint ? parseLength(step.raw) : null;
+    const length = jointLen && !jointLen.error && jointLen.inches > 0 ? jointLen.inches : 0;
+    if (isJoint && (jointLen.error || !(jointLen.inches > 0))) {
+      errors.push(`${name} needs a length.`);
+    }
     if (ang.empty || ang.error || !Number.isFinite(ang.degrees) || Math.abs(ang.degrees) < 1e-9) {
       errors.push(`${name} needs an angle.`);
-      steps.push({ ...step, angle: 0, rotation: 0, radius: clr.inches, miter: 0 });
+      steps.push({ ...step, length, angle: 0, rotation: 0, radius: clr.inches, miter: 0 });
       return;
     }
     if (isJoint && Math.abs(ang.degrees) >= 180) {
       errors.push(`${name} must be less than 180°.`);
-      steps.push({ ...step, angle: ang.degrees, rotation: 0, radius: 0, miter: Math.abs(ang.degrees) / 2 });
+      steps.push({ ...step, length, angle: ang.degrees, rotation: 0, radius: 0, miter: Math.abs(ang.degrees) / 2 });
       return;
     }
     if (!isJoint && Math.abs(ang.degrees) >= 360) {
@@ -965,11 +979,12 @@ function parsedPipeSteps() {
     }
     if (rot.error || !Number.isFinite(rot.degrees)) {
       errors.push(`${name} clock isn’t recognized.`);
-      steps.push({ ...step, angle: ang.degrees, rotation: 0, radius: isJoint ? 0 : clr.inches, miter: Math.abs(ang.degrees) / 2 });
+      steps.push({ ...step, length, angle: ang.degrees, rotation: 0, radius: isJoint ? 0 : clr.inches, miter: Math.abs(ang.degrees) / 2 });
       return;
     }
     steps.push({
       ...step,
+      length,
       angle: ang.degrees,
       rotation: rot.degrees ?? 0,
       radius: isJoint ? 0 : clr.inches,
@@ -1014,8 +1029,9 @@ function updatePipeStepConvs(parsed) {
   if (pipeOdConv) {
     pipeOdConv.textContent = parsed.od > 0 ? lengthConvLine(parsed.od) : "";
   }
-  pipeStepsEl.querySelectorAll("[data-straight]").forEach((input) => {
-    const step = parsed.steps.find((s) => s.id === input.dataset.straight);
+  pipeStepsEl.querySelectorAll("[data-straight], [data-len]").forEach((input) => {
+    const id = input.dataset.straight || input.dataset.len;
+    const step = parsed.steps.find((s) => s.id === id);
     const conv = input.closest("label")?.querySelector(".conv");
     if (conv) conv.textContent = step?.length ? lengthConvLine(step.length) : "";
   });
@@ -1078,6 +1094,9 @@ function renderPipeList(parsed) {
         straightN += 1;
         return `<li class="cage-card" data-id="${step.id}">
           <header>
+            <button class="icon-btn cage-handle" type="button" aria-label="Drag straight ${straightN}" tabindex="-1">
+              <span class="sort-lines" aria-hidden="true"></span>
+            </button>
             <h3>Straight ${straightN}</h3>
             <button class="icon-btn" type="button" data-drop="${step.id}" aria-label="Remove straight ${straightN}">×</button>
           </header>
@@ -1100,12 +1119,26 @@ function renderPipeList(parsed) {
       const name = isJoint ? `Joint ${n}` : `Bend ${n}`;
       return `<li class="cage-card" data-id="${step.id}">
         <header>
+          <button class="icon-btn cage-handle" type="button" aria-label="Drag ${name}" tabindex="-1">
+            <span class="sort-lines" aria-hidden="true"></span>
+          </button>
           <h3>${name}</h3>
           <button class="icon-btn" type="button" data-drop="${step.id}" aria-label="Remove ${name}">×</button>
         </header>
         <div class="cage-fields">
           ${first ? sitAng : ""}
           ${first ? sitRot : ""}
+          ${
+            isJoint
+              ? `<label class="cage-span">Length
+              <div class="unit-field">
+                <input data-len="${step.id}" value="${escapeHtml(step.raw || "")}" placeholder="2" inputmode="text" />
+                <span class="unit">in</span>
+              </div>
+              <p class="conv">${found?.length ? lengthConvLine(found.length) : ""}</p>
+            </label>`
+              : ""
+          }
           <label>${isJoint ? "Joint" : "Bend"}
             <div class="unit-field">
               <input data-angle="${step.id}" value="${escapeHtml(step.angleRaw)}" placeholder="90" inputmode="decimal" />
@@ -1125,6 +1158,7 @@ function renderPipeList(parsed) {
       </li>`;
     })
     .join("");
+  syncCageSort();
 }
 
 function setPickDist(on) {
@@ -1155,6 +1189,23 @@ function pickStation(id) {
   if (pipeWorkspace) pipeWorkspace.classList.remove("is-picking");
   persist();
   setTab("distance");
+}
+
+function nearestStationAt(clientX, clientY) {
+  const nodes = pipeSvg?.querySelectorAll("[data-station]");
+  if (!nodes?.length) return null;
+  let best = null;
+  let bestD = Infinity;
+  nodes.forEach((el) => {
+    const box = el.getBoundingClientRect();
+    const d = Math.hypot(clientX - (box.left + box.width / 2), clientY - (box.top + box.height / 2));
+    if (d < bestD) {
+      bestD = d;
+      best = el.dataset.station;
+    }
+  });
+  const limit = pickDist ? 32 : 22;
+  return bestD <= limit ? best : null;
 }
 
 function pipeView() {
@@ -1223,6 +1274,8 @@ function renderPipePreview(parsed) {
     pipeStatus.textContent = pickIds.length
       ? `Point ${pickIds[0]} selected. Tap a second point, or tap ${pickIds[0]} again to cancel.`
       : "Tap the first named point on the cage.";
+  } else if (!pipeLive) {
+    pipeStatus.textContent = "Tap the cube to move the view.";
   } else {
     pipeStatus.textContent =
       "One finger turns · two fingers move · pinch to zoom.";
@@ -1252,7 +1305,8 @@ function renderPipePreview(parsed) {
       return `<circle class="${cls}" cx="${m.x}" cy="${m.y}" r="${r}" />`;
     })
     .join("");
-  const stationMarks = (laid.stations || [])
+  const stationMarks = [...(laid.stations || [])]
+    .sort((a, b) => (b.z ?? 0) - (a.z ?? 0))
     .map((s) => {
       const r = Math.max(pickDist ? 12 : 8, Math.min(pickDist ? 15 : 11, dotR + (pickDist ? 5 : 2)));
       const hit = pickDist ? 26 : 18;
@@ -1285,7 +1339,7 @@ function renderPipePreview(parsed) {
       detail: "",
     };
   });
-  const placed = placeAnchoredBoxes(chipItems, { w: 118, h: 46 }, { w, h }, 26);
+  const placed = placeAnchoredBoxes(chipItems, { w: 72, h: 22 }, { w, h }, 18);
 
   if (pipeChips) {
     pipeChips.innerHTML = placed
@@ -1343,13 +1397,13 @@ function renderPipePreview(parsed) {
   const odConv = lengthConversions(od, state.precision);
   pipeResult.innerHTML = `<div class="total">
     <p class="equation">${model.bendCount} bend${model.bendCount === 1 ? "" : "s"} · ${model.jointCount} joint${model.jointCount === 1 ? "" : "s"} · ${odConv.fractionalInches} diameter</p>
-    <div class="total-main"><span>Centerline</span><strong>${conv.fractionalInches}</strong></div>
+    <div class="total-main"><span>Center to center</span><strong>${conv.fractionalInches}</strong></div>
     <div class="alts">
       <span>${conv.feetInches}</span>
       <span>${conv.decimalInches}</span>
       <span>${conv.mm}</span>
-      <span>Inside ${inside.fractionalInches}</span>
-      <span>Outside ${outside.fractionalInches}</span>
+      <span>Inside to inside ${inside.fractionalInches}</span>
+      <span>Outside to outside ${outside.fractionalInches}</span>
       <span>End reach ${reach.fractionalInches}</span>
     </div>
   </div>`;
@@ -1369,22 +1423,68 @@ function renderPipe(rebuildList = false) {
   renderDistance();
 }
 
-function currentStations() {
+function currentPipeModel() {
   const parsed = parsedPipeSteps();
   const od = parsed.od > 0 ? parsed.od : 0;
   const first = state.pipe.steps[0];
   const firstTurn = first?.type === "bend" || first?.type === "joint";
-  const model = buildPipe(parsed.clr || 3, parsed.steps, od, {
+  return buildPipe(parsed.clr || 3, parsed.steps, od, {
     angle: parsed.startAngle || 0,
     rotation: firstTurn ? parsed.startRot || 0 : 0,
     firstBend: firstTurn,
   });
-  return model.stations || [];
+}
+
+function currentStations() {
+  return currentPipeModel().stations || [];
+}
+
+function inchMark(value) {
+  return lengthConversions(value, state.precision).fractionalInches;
+}
+
+function signedInch(value) {
+  if (!(Math.abs(value) > 1e-9)) return inchMark(0);
+  return `${value < 0 ? "−" : ""}${inchMark(Math.abs(value))}`;
+}
+
+function distMeasure(inches, alts = false) {
+  if (!Number.isFinite(inches) || inches < -1e-9) {
+    return { main: "—", alts: "" };
+  }
+  const conv = lengthConversions(Math.max(0, inches), state.precision);
+  return {
+    main: conv.fractionalInches,
+    alts: alts
+      ? `<div class="alts">
+          <span>${conv.feetInches}</span>
+          <span>${conv.decimalInches}</span>
+          <span>${conv.mm}</span>
+        </div>`
+      : "",
+  };
+}
+
+function distRow(label, inches, alts = false) {
+  const shown = distMeasure(inches, alts);
+  return `<div class="total-main"><span>${label}</span><strong>${shown.main}</strong></div>${shown.alts}`;
+}
+
+function legsBetween(legs, stations, fromId, toId) {
+  const ids = stations.map((s) => s.id);
+  const i = ids.indexOf(fromId);
+  const j = ids.indexOf(toId);
+  if (i < 0 || j < 0 || i === j) return [];
+  const lo = Math.min(i, j);
+  const hi = Math.max(i, j);
+  const span = new Set(ids.slice(lo, hi + 1));
+  return (legs || []).filter((leg) => span.has(leg.from) && span.has(leg.to) && (leg.length || 0) > 1e-9);
 }
 
 function renderDistance() {
   if (!distFromEl || !distToEl) return;
-  const stations = currentStations();
+  const model = currentPipeModel();
+  const stations = model.stations || [];
   const ids = new Set(stations.map((s) => s.id));
   if (!ids.has(state.distFrom)) state.distFrom = stations[0]?.id || "";
   if (!ids.has(state.distTo)) state.distTo = stations[stations.length - 1]?.id || "";
@@ -1396,55 +1496,89 @@ function renderDistance() {
   distToEl.innerHTML = opts;
   if (state.distFrom) distFromEl.value = state.distFrom;
   if (state.distTo) distToEl.value = state.distTo;
-  if (distPoints) {
-    distPoints.innerHTML = stations
-      .map((s) => `<li class="dist-row"><span class="dist-id">${escapeHtml(s.name)}</span></li>`)
-      .join("");
-  }
   const from = stations.find((s) => s.id === state.distFrom);
   const to = stations.find((s) => s.id === state.distTo);
-  if (distFromEmpty) distFromEmpty.hidden = stations.length > 1;
   if (!from || !to || from.id === to.id) {
     if (distResult) {
       distResult.innerHTML = stations.length < 2 ? `<p class="empty">Need at least two named points on the cage.</p>` : "";
     }
-    if (distFromList) distFromList.innerHTML = "";
+    if (distWork) distWork.innerHTML = "";
+    if (distWorkPanel) distWorkPanel.hidden = true;
     return;
   }
-  const straight = Math.hypot(from.x - to.x, from.y - to.y, from.z - to.z);
-  const along = Math.abs((from.along || 0) - (to.along || 0));
-  const sc = lengthConversions(straight, state.precision);
-  const ac = lengthConversions(along, state.precision);
-  distResult.innerHTML = `<div class="total">
-    <p class="equation">${from.name} to ${to.name}</p>
-    <div class="total-main"><span>Straight-line</span><strong>${sc.fractionalInches}</strong></div>
-    <div class="alts">
-      <span>${sc.feetInches}</span>
-      <span>${sc.decimalInches}</span>
-      <span>${sc.mm}</span>
-    </div>
-    <div class="total-main" style="margin-top:10px"><span>Along pipe</span><strong>${ac.fractionalInches}</strong></div>
-    <div class="alts">
-      <span>${ac.feetInches}</span>
-      <span>${ac.decimalInches}</span>
-      <span>${ac.mm}</span>
-    </div>
-  </div>`;
-  distFromList.innerHTML = stations
-    .filter((s) => s.id !== from.id)
-    .map((s) => {
-      const d = Math.hypot(from.x - s.x, from.y - s.y, from.z - s.z);
-      const conv = lengthConversions(d, state.precision);
-      return `<li class="dist-row" data-dist-to="${s.id}">
-        <span class="dist-id">${from.name}–${s.name}</span>
-        <span class="dist-len">${conv.fractionalInches}</span>
-      </li>`;
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const dz = to.z - from.z;
+  const straight = Math.hypot(dx, dy, dz);
+  const od = model.od > 0 ? model.od : 0;
+  const alongA = from.along || 0;
+  const alongB = to.along || 0;
+  const along = Math.abs(alongA - alongB);
+  const sumSq = dx * dx + dy * dy + dz * dz;
+  const pieces = legsBetween(model.legs, stations, from.id, to.id);
+  const alongInside = along - pieces.reduce((sum, leg) => sum + ((leg.length || 0) - (leg.inside ?? leg.length ?? 0)), 0);
+  const alongOutside = along + pieces.reduce((sum, leg) => sum + ((leg.outside ?? leg.length ?? 0) - (leg.length || 0)), 0);
+  const pieceRows = pieces
+    .map((leg) => {
+      const note =
+        leg.kind === "bend"
+          ? `${inchMark(leg.radius)} CLR · inside ${inchMark(leg.inside)} · outside ${inchMark(leg.outside)}`
+          : "";
+      return `<div class="work-row">
+        <span>${escapeHtml(leg.from)}→${escapeHtml(leg.to)}</span>
+        <span class="work-note">${escapeHtml(leg.label)}${note ? ` · ${escapeHtml(note)}` : ""}</span>
+        <span>${inchMark(leg.length)}</span>
+      </div>`;
     })
     .join("");
+  distResult.innerHTML = `<div class="total">
+    <p class="equation">${from.name} to ${to.name}</p>
+    <p class="dist-kind">Straight-line · through space</p>
+    ${distRow("Center to center", straight, true)}
+    ${distRow("Inside to inside", straight - od)}
+    ${distRow("Outside to outside", straight + od)}
+    <p class="dist-kind">Along pipe</p>
+    ${distRow("Center to center", along, true)}
+    ${distRow("Inside to inside", alongInside)}
+    ${distRow("Outside to outside", alongOutside)}
+  </div>`;
+  if (distWork) {
+    distWork.innerHTML = `<p class="equation">${escapeHtml(from.name)} to ${escapeHtml(to.name)}</p>
+      <div class="work">
+        <p class="work-kicker">Straight-line</p>
+        <p class="work-line">ΔX = ${signedInch(dx)}</p>
+        <p class="work-line">ΔY = ${signedInch(dy)}</p>
+        <p class="work-line">ΔZ = ${signedInch(dz)}</p>
+        <p class="work-line">Center to center d = √(ΔX² + ΔY² + ΔZ²)</p>
+        <p class="work-line">= √(${formatDecimal(dx, 3)}² + ${formatDecimal(dy, 3)}² + ${formatDecimal(dz, 3)}²)</p>
+        <p class="work-line">= √(${formatDecimal(dx * dx, 3)} + ${formatDecimal(dy * dy, 3)} + ${formatDecimal(dz * dz, 3)})</p>
+        <p class="work-line">= √${formatDecimal(sumSq, 3)} = ${formatDecimal(straight, 3)} in</p>
+        <p class="work-line">OD = ${inchMark(od)}</p>
+        <p class="work-line">Inside to inside = d − OD = ${straight - od < -1e-9 ? "—" : inchMark(straight - od)}</p>
+        <p class="work-line">Outside to outside = d + OD = ${inchMark(straight + od)}</p>
+      </div>
+      <div class="work">
+        <p class="work-kicker">Along pipe</p>
+        <p class="work-line">Center to center at ${escapeHtml(from.name)} = ${inchMark(alongA)}</p>
+        <p class="work-line">Center to center at ${escapeHtml(to.name)} = ${inchMark(alongB)}</p>
+        <p class="work-line">|${inchMark(alongB)} − ${inchMark(alongA)}| = ${inchMark(along)}</p>
+        <p class="work-line">Inside to inside = ${inchMark(alongInside)}</p>
+        <p class="work-line">Outside to outside = ${inchMark(alongOutside)}</p>
+        ${
+          pieceRows
+            ? `<div class="work-pieces">${pieceRows}<div class="work-row work-sum"><span></span><span>Center to center</span><span>${inchMark(along)}</span></div>
+            <div class="work-row work-sum"><span></span><span>Inside to inside</span><span>${inchMark(alongInside)}</span></div>
+            <div class="work-row work-sum"><span></span><span>Outside to outside</span><span>${inchMark(alongOutside)}</span></div></div>`
+            : ""
+        }
+      </div>`;
+  }
+  if (distWorkPanel) distWorkPanel.hidden = false;
 }
 
 pipeStepsEl.addEventListener("input", (event) => {
   const straight = event.target.closest("[data-straight]");
+  const jointLen = event.target.closest("[data-len]");
   const angle = event.target.closest("[data-angle]");
   const rot = event.target.closest("[data-rot]");
   const startAng = event.target.closest("[data-start-angle]");
@@ -1452,6 +1586,10 @@ pipeStepsEl.addEventListener("input", (event) => {
   if (straight) {
     const step = state.pipe.steps.find((item) => item.id === straight.dataset.straight);
     if (step) step.raw = straight.value;
+  }
+  if (jointLen) {
+    const step = state.pipe.steps.find((item) => item.id === jointLen.dataset.len);
+    if (step) step.raw = jointLen.value;
   }
   if (angle) {
     const step = state.pipe.steps.find((item) => item.id === angle.dataset.angle);
@@ -1468,6 +1606,26 @@ pipeStepsEl.addEventListener("input", (event) => {
 });
 
 let cageDrag = null;
+
+function cageSorting() {
+  return pipeStepsEl?.classList.contains("is-sorting");
+}
+
+function syncCageSort() {
+  if (!cageSortBtn || !pipeStepsEl) return;
+  const canSort = state.pipe.steps.length > 1;
+  if (!canSort) pipeStepsEl.classList.remove("is-sorting");
+  cageSortBtn.disabled = !canSort;
+  cageSortBtn.setAttribute("aria-pressed", String(canSort && cageSorting()));
+}
+
+if (cageSortBtn) {
+  cageSortBtn.addEventListener("click", () => {
+    if (state.pipe.steps.length < 2) return;
+    pipeStepsEl.classList.toggle("is-sorting");
+    syncCageSort();
+  });
+}
 
 pipeStepsEl.addEventListener("click", async (event) => {
   if (cageDrag?.moved) return;
@@ -1507,9 +1665,11 @@ function commitCageOrder() {
 }
 
 pipeStepsEl.addEventListener("pointerdown", (event) => {
-  if (event.target.closest("input, button, .unit-field")) return;
+  if (!cageSorting()) return;
+  if (event.target.closest("input, [data-drop], .unit-field")) return;
   const card = event.target.closest(".cage-card");
   if (!card || state.pipe.steps.length < 2) return;
+  event.preventDefault();
   cageDrag = {
     id: card.dataset.id,
     y: event.clientY,
@@ -1581,6 +1741,7 @@ document.getElementById("add-joint").addEventListener("click", () => {
   state.pipe.steps.push({
     id: crypto.randomUUID(),
     type: "joint",
+    raw: "2",
     angleRaw: "90",
     rotRaw: "0",
   });
@@ -1616,9 +1777,28 @@ let pipeTwo = null;
 let pipeTap = null;
 let pipeBlockRotate = false;
 let pipeZoomSave = 0;
+let pipeLive = false;
+
+function setPipeLive(on) {
+  const next = Boolean(on);
+  const changed = next !== pipeLive;
+  pipeLive = next;
+  pipeWorkspace?.classList.toggle("is-live", pipeLive);
+  if (pipeEngage) pipeEngage.hidden = pipeLive;
+  if (pipeDone) pipeDone.hidden = !pipeLive;
+  if (!pipeLive) {
+    pipeRotate = null;
+    pipeTwo = null;
+    pipeTap = null;
+    pipeHands.clear();
+    pipeBlockRotate = false;
+    pipeWorkspace?.classList.remove("is-drag");
+  }
+  if (changed && state.tab === "pipe") renderPipePreview(parsedPipeSteps());
+}
 
 function pipeChromeHit(target) {
-  return target?.closest?.("#dist-pick-btn, #pipe-recenter");
+  return target?.closest?.("#dist-pick-btn, #pipe-recenter, #pipe-engage, #pipe-done");
 }
 
 function pipeDragTarget(event) {
@@ -1695,18 +1875,21 @@ pipeWorkspace.addEventListener(
   "touchstart",
   (event) => {
     if (pipeChromeHit(event.target)) return;
-    const station = event.target.closest?.("[data-station]");
-    if (pickDist && station && event.touches.length === 1) {
+    if (pickDist && event.touches.length === 1) {
       const touch = event.touches[0];
-      pipeTap = {
-        id: station.dataset.station,
-        x: touch.clientX,
-        y: touch.clientY,
-        pointerId: touch.identifier,
-      };
-      if (event.cancelable) event.preventDefault();
-      return;
+      const id = nearestStationAt(touch.clientX, touch.clientY);
+      if (id) {
+        pipeTap = {
+          id,
+          x: touch.clientX,
+          y: touch.clientY,
+          pointerId: touch.identifier,
+        };
+        if (event.cancelable) event.preventDefault();
+        return;
+      }
     }
+    if (!pipeLive) return;
     if (event.cancelable) event.preventDefault();
     const points = pipeTouchPoints(event);
     if (points.length >= 2) {
@@ -1773,23 +1956,37 @@ window.addEventListener("touchend", onPipeTouchEnd, { passive: false, capture: t
 window.addEventListener("touchcancel", onPipeTouchEnd, { passive: false, capture: true });
 
 ["gesturestart", "gesturechange", "gestureend"].forEach((type) => {
-  pipeWorkspace.addEventListener(type, (event) => event.preventDefault());
+  pipeWorkspace.addEventListener(type, (event) => {
+    if (pipeLive && event.cancelable) event.preventDefault();
+  });
+});
+
+pipeEngage?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setPipeLive(true);
+});
+pipeDone?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setPipeLive(false);
 });
 
 pipeWorkspace.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "touch") return;
   if (pipeChromeHit(event.target)) return;
-  const station = event.target.closest?.("[data-station]");
-  if (pickDist && station) {
-    event.preventDefault();
-    pipeTap = {
-      id: station.dataset.station,
-      x: event.clientX,
-      y: event.clientY,
-      pointerId: event.pointerId,
-    };
-    return;
+  if (pickDist) {
+    const id = nearestStationAt(event.clientX, event.clientY);
+    if (id) {
+      event.preventDefault();
+      pipeTap = {
+        id,
+        x: event.clientX,
+        y: event.clientY,
+        pointerId: event.pointerId,
+      };
+      return;
+    }
   }
+  if (!pipeLive) return;
   if (event.target.closest?.(".pipe-tag")) return;
   if (!pipeDragTarget(event) && event.target !== pipeWorkspace) return;
   pipeHands.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -1852,6 +2049,7 @@ pipeWorkspace.addEventListener("pointercancel", endPipePointer);
 pipeWorkspace.addEventListener(
   "wheel",
   (event) => {
+    if (!pipeLive) return;
     event.preventDefault();
     const svg = pipeClientToSvg(event.clientX, event.clientY);
     applyPipeView(zoomPipeAt(svg.x, svg.y, pipeView().zoom * Math.exp(-event.deltaY * 0.0018)));
@@ -1901,7 +2099,7 @@ async function setupPwa() {
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js?v=48");
+    const reg = await navigator.serviceWorker.register("./sw.js?v=68");
     const ready = await navigator.serviceWorker.ready;
     if (ready.active || reg.active) installBtn.textContent = "Ready";
     navigator.serviceWorker.addEventListener("message", (event) => {

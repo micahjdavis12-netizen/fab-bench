@@ -68,6 +68,7 @@ export function projectPoint(p, yaw, pitch) {
   return {
     x: x1,
     y: p.y * cp - z1 * sp,
+    z: p.y * sp + z1 * cp,
   };
 }
 
@@ -129,6 +130,8 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
   const pipeR = od > 0 ? od / 2 : 0;
 
   const stations = [];
+  const legs = [];
+  let here = null;
   const addStation = (hint) => {
     const last = stations[stations.length - 1];
     if (last && hypot3(sub(last, pos)) < 1e-6) {
@@ -149,9 +152,24 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
     return next;
   };
 
+  const addLeg = (kind, label, fromId, extra = {}) => {
+    if (!here || here.id === fromId) return;
+    legs.push({
+      kind,
+      label,
+      from: fromId,
+      to: here.id,
+      length: extra.length ?? 0,
+      inside: extra.inside ?? extra.length ?? 0,
+      outside: extra.outside ?? extra.length ?? 0,
+      radius: extra.radius,
+      angle: extra.angle,
+    });
+  };
+
   pts.push({ ...pos, kind: "start" });
   marks.push({ ...pos, kind: "start" });
-  addStation("Start");
+  here = addStation("Start");
 
   steps.forEach((step, index) => {
     if (step.type === "straight") {
@@ -173,13 +191,20 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
       pts.push({ ...next, kind: "straight" });
       pos = next;
       marks.push({ ...pos, kind: "joint" });
-      addStation(`Straight ${n} end`);
+      const fromId = here.id;
+      here = addStation(`Straight ${n} end`);
+      addLeg("straight", `Straight ${n}`, fromId, { length: len, inside: len, outside: len });
       return;
     }
 
     const angle = step.angle;
     const rotation = step.rotation || 0;
     if (step.type === "joint") {
+      const len = step.length;
+      if (!(len > 0)) {
+        errors.push(`Joint ${jointCount + 1} needs a length greater than zero.`);
+        return;
+      }
       if (!Number.isFinite(angle) || Math.abs(angle) < EPS) {
         errors.push(`Joint ${jointCount + 1} needs an angle.`);
         return;
@@ -191,15 +216,22 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
       ({ T, N } = rollClock(T, N, rotation));
       N = unit(N);
       T = unit(rot(T, N, angle));
+      const next = add(pos, scale(T, len));
+      pts.push({ ...next, kind: "joint" });
+      developed += len;
+      developedInside += len;
+      developedOutside += len;
       jointCount += 1;
       labels.push({
         kind: "joint",
         text: `Joint ${jointCount}`,
-        at: { ...pos },
+        at: add(pos, scale(T, len / 2)),
       });
       marks.push({ ...pos, kind: "weld" });
-      pts.push({ ...pos, kind: "joint" });
-      addStation(`Joint ${jointCount}`);
+      pos = next;
+      const fromId = here.id;
+      here = addStation(`Joint ${jointCount} end`);
+      addLeg("joint", `Joint ${jointCount}`, fromId, { length: len, inside: len, outside: len, angle });
       return;
     }
 
@@ -233,9 +265,11 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
     const arc = radius * Math.abs((angle * Math.PI) / 180);
     const innerR = Math.max(0, radius - pipeR);
     const outerR = radius + pipeR;
+    const innerArc = innerR * Math.abs((angle * Math.PI) / 180);
+    const outerArc = outerR * Math.abs((angle * Math.PI) / 180);
     developed += arc;
-    developedInside += innerR * Math.abs((angle * Math.PI) / 180);
-    developedOutside += outerR * Math.abs((angle * Math.PI) / 180);
+    developedInside += innerArc;
+    developedOutside += outerArc;
     bendCount += 1;
     labels.push({
       kind: "bend",
@@ -243,7 +277,15 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
       at: add(C, rot(rel0, N, angle / 2)),
     });
     marks.push({ ...pos, kind: "bend" });
-    addStation(`Bend ${bendCount} exit`);
+    const fromId = here.id;
+    here = addStation(`Bend ${bendCount} exit`);
+    addLeg("bend", `Bend ${bendCount}`, fromId, {
+      length: arc,
+      inside: innerArc,
+      outside: outerArc,
+      radius,
+      angle,
+    });
   });
 
   if (marks.length && marks[marks.length - 1].kind !== "weld") {
@@ -262,6 +304,7 @@ export function buildPipe(clr, steps, od = 0, start = { angle: 0, rotation: 0, f
     bendCount,
     jointCount,
     stations,
+    legs,
     end: pos,
     reach: hypot3(pos),
     errors,
@@ -395,12 +438,16 @@ export function layoutPipePath(model, width, height, yaw, pitch, pad = 36, od = 
     d,
     marks: marks.map((p, i) => ({ ...map(p), kind: model.marks[i].kind })),
     labels: labels.map((item) => ({ ...map(item), text: item.text, kind: item.kind })),
-    stations: (model.stations || []).map((item) => ({
-      ...map(projectPoint(item, yaw, pitch)),
-      id: item.id,
-      name: item.name,
-      hint: item.hint,
-    })),
+    stations: (model.stations || []).map((item) => {
+      const p = projectPoint(item, yaw, pitch);
+      return {
+        ...map(p),
+        z: p.z,
+        id: item.id,
+        name: item.name,
+        hint: item.hint,
+      };
+    }),
     floor: { fill, grid, edge },
     scale: scaleN,
     width,

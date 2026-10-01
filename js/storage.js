@@ -9,6 +9,7 @@ const defaults = {
   calc: [],
   tab: "triangle",
   pipe: null,
+  theme: "light",
 };
 
 function sanitizeCalc(items) {
@@ -34,6 +35,19 @@ function sanitizeTab(tab) {
   return tab === "combine" || tab === "pipe" || tab === "triangle" || tab === "distance" ? tab : "triangle";
 }
 
+function sanitizeTheme(theme) {
+  return theme === "dark" || theme === "light" ? theme : "";
+}
+
+function resolveTheme(saved) {
+  const explicit = sanitizeTheme(saved);
+  if (explicit) return explicit;
+  if (typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches) {
+    return "dark";
+  }
+  return "light";
+}
+
 function sanitizePipe(pipe, fallback) {
   if (!pipe || typeof pipe !== "object") return fallback;
   const steps = Array.isArray(pipe.steps)
@@ -42,12 +56,14 @@ function sanitizePipe(pipe, fallback) {
         .map((step) => {
           if (!step || typeof step !== "object") return null;
           if (step.type === "bend" || step.type === "joint") {
-            return {
+            const next = {
               id: String(step.id || crypto.randomUUID()),
               type: step.type === "joint" ? "joint" : "bend",
               angleRaw: String(step.angleRaw ?? ""),
               rotRaw: String(step.rotRaw ?? "0"),
             };
+            if (next.type === "joint") next.raw = String(step.raw ?? "");
+            return next;
           }
           return {
             id: String(step.id || crypto.randomUUID()),
@@ -87,7 +103,7 @@ export function loadState(makePipe) {
     : { clrRaw: "3", odRaw: "1 1/2", startAngleRaw: "0", startRotRaw: "0", yaw: 0, pitch: 22, zoom: 1, panX: 0, panY: 0, steps: [] };
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "" };
+    if (!raw) return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "", theme: resolveTheme() };
     const data = JSON.parse(raw);
     const precision = [16, 32, 64].includes(data.precision) ? data.precision : 16;
     const bank = Array.isArray(data.bank) ? data.bank.slice(0, BANK_LIMIT) : [];
@@ -103,10 +119,11 @@ export function loadState(makePipe) {
       tab: sanitizeTab(data.tab),
       distFrom: typeof data.distFrom === "string" ? data.distFrom : "",
       distTo: typeof data.distTo === "string" ? data.distTo : "",
+      theme: resolveTheme(data.theme),
       pipe: { ...pipe, yaw: fallbackPipe.yaw, pitch: fallbackPipe.pitch },
     };
   } catch {
-    return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "" };
+    return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "", theme: resolveTheme() };
   }
 }
 
@@ -119,6 +136,7 @@ export function saveState(partial, makePipe) {
     tab: sanitizeTab(partial.tab ?? current.tab),
     distFrom: String(partial.distFrom ?? current.distFrom ?? "").slice(0, 8),
     distTo: String(partial.distTo ?? current.distTo ?? "").slice(0, 8),
+    theme: resolveTheme(partial.theme ?? current.theme),
     pipeVersion: 3,
     pipe: sanitizePipe(partial.pipe ?? current.pipe, current.pipe),
   };

@@ -1,4 +1,4 @@
-const CACHE = "fab-bench-v27";
+const CACHE = "fab-bench-v44";
 const ASSETS = [
   "./",
   "./index.html",
