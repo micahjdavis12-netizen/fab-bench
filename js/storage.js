@@ -48,6 +48,25 @@ function resolveTheme(saved) {
   return "light";
 }
 
+function sanitizeFit(fit) {
+  if (!fit || typeof fit !== "object") return null;
+  const field = fit.field === "angle" ? "angle" : "length";
+  const path = fit.path === "along" ? "along" : "space";
+  const from = String(fit.from || "").slice(0, 8);
+  const to = String(fit.to || "").slice(0, 8);
+  const raw = String(fit.raw ?? "").slice(0, 48);
+  if (!from || !to || from === to) return null;
+  const base = Number(fit.base);
+  return {
+    field,
+    path,
+    from,
+    to,
+    raw,
+    ...(Number.isFinite(base) ? { base } : {}),
+  };
+}
+
 function sanitizePipe(pipe, fallback) {
   if (!pipe || typeof pipe !== "object") return fallback;
   const steps = Array.isArray(pipe.steps)
@@ -55,6 +74,7 @@ function sanitizePipe(pipe, fallback) {
         .slice(0, PIPE_STEP_LIMIT)
         .map((step) => {
           if (!step || typeof step !== "object") return null;
+          const fit = sanitizeFit(step.fit);
           if (step.type === "bend" || step.type === "joint") {
             const next = {
               id: String(step.id || crypto.randomUUID()),
@@ -63,13 +83,16 @@ function sanitizePipe(pipe, fallback) {
               rotRaw: String(step.rotRaw ?? "0"),
             };
             if (next.type === "joint") next.raw = String(step.raw ?? "");
+            if (fit) next.fit = fit;
             return next;
           }
-          return {
+          const straight = {
             id: String(step.id || crypto.randomUUID()),
             type: "straight",
             raw: String(step.raw ?? ""),
           };
+          if (fit) straight.fit = fit;
+          return straight;
         })
         .filter(Boolean)
     : [];
@@ -103,7 +126,7 @@ export function loadState(makePipe) {
     : { clrRaw: "3", odRaw: "1 1/2", startAngleRaw: "0", startRotRaw: "0", yaw: 0, pitch: 22, zoom: 1, panX: 0, panY: 0, steps: [] };
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "", theme: resolveTheme() };
+    if (!raw) return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "", distFace: "center", theme: resolveTheme() };
     const data = JSON.parse(raw);
     const precision = [16, 32, 64].includes(data.precision) ? data.precision : 16;
     const bank = Array.isArray(data.bank) ? data.bank.slice(0, BANK_LIMIT) : [];
@@ -119,11 +142,12 @@ export function loadState(makePipe) {
       tab: sanitizeTab(data.tab),
       distFrom: typeof data.distFrom === "string" ? data.distFrom : "",
       distTo: typeof data.distTo === "string" ? data.distTo : "",
+      distFace: data.distFace === "inside" || data.distFace === "outside" ? data.distFace : "center",
       theme: resolveTheme(data.theme),
       pipe: { ...pipe, yaw: fallbackPipe.yaw, pitch: fallbackPipe.pitch },
     };
   } catch {
-    return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "", theme: resolveTheme() };
+    return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "", distFace: "center", theme: resolveTheme() };
   }
 }
 
@@ -136,6 +160,11 @@ export function saveState(partial, makePipe) {
     tab: sanitizeTab(partial.tab ?? current.tab),
     distFrom: String(partial.distFrom ?? current.distFrom ?? "").slice(0, 8),
     distTo: String(partial.distTo ?? current.distTo ?? "").slice(0, 8),
+    distFace: partial.distFace === "inside" || partial.distFace === "outside" || partial.distFace === "center"
+      ? partial.distFace
+      : current.distFace === "inside" || current.distFace === "outside"
+        ? current.distFace
+        : "center",
     theme: resolveTheme(partial.theme ?? current.theme),
     pipeVersion: 3,
     pipe: sanitizePipe(partial.pipe ?? current.pipe, current.pipe),

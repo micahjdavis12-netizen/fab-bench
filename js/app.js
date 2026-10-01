@@ -6,7 +6,7 @@ import {
   parseAngle,
   parseDegrees,
   parseLength,
-} from "./parse.js?v=68";
+} from "./parse.js?v=83";
 import {
   controlAnchors,
   evaluateCalculation,
@@ -15,9 +15,10 @@ import {
   placeAttachedChips,
   solveTriangle,
   unit as vecUnit,
-} from "./solve.js?v=68";
-import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=68";
-import { loadState, saveState } from "./storage.js?v=68";
+} from "./solve.js?v=83";
+import { pairDistance, solveFitValue, wrapShopAngle } from "./fit.js?v=83";
+import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=83";
+import { loadState, saveState } from "./storage.js?v=83";
 
 const KEYS = ["a", "b", "c", "A", "B", "C"];
 const SIDE_KEYS = ["a", "b", "c"];
@@ -113,7 +114,6 @@ const distWork = document.getElementById("dist-work");
 const distWorkPanel = document.getElementById("dist-work-panel");
 const distPickBtn = document.getElementById("dist-pick-btn");
 const pipeRecenter = document.getElementById("pipe-recenter");
-const cageSortBtn = document.getElementById("cage-sort");
 const themeToggle = document.getElementById("theme-toggle");
 const themeColorMeta = document.querySelector('meta[name="theme-color"]');
 
@@ -136,6 +136,7 @@ const state = {
   tab: stored.tab,
   distFrom: stored.distFrom || "",
   distTo: stored.distTo || "",
+  distFace: stored.distFace === "inside" || stored.distFace === "outside" ? stored.distFace : "center",
   theme: stored.theme === "dark" ? "dark" : "light",
   pipe: { ...defaultPipe(), ...stored.pipe },
 };
@@ -151,6 +152,7 @@ const desk = {
 
 let pickDist = false;
 let pickIds = [];
+let pipeLive = false;
 
 precisionEl.value = String(state.precision);
 
@@ -163,6 +165,7 @@ function persist() {
       tab: state.tab,
       distFrom: state.distFrom,
       distTo: state.distTo,
+      distFace: state.distFace,
       theme: state.theme,
       pipe: state.pipe,
     },
@@ -190,12 +193,179 @@ if (themeToggle) {
   });
 }
 
+function motionOk() {
+  return !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+}
+
+function syncSegPill(root, selectedSel, animate = true) {
+  if (!root) return;
+  let pill = root.querySelector(":scope > .seg-pill");
+  if (!pill) {
+    pill = document.createElement("span");
+    pill.className = "seg-pill";
+    pill.setAttribute("aria-hidden", "true");
+    root.prepend(pill);
+  }
+  const on = root.querySelector(selectedSel);
+  if (!on) return;
+  const box = root.getBoundingClientRect();
+  const hit = on.getBoundingClientRect();
+  const reduce = !animate || !motionOk();
+  pill.style.transition = reduce ? "none" : "";
+  pill.style.width = `${hit.width}px`;
+  pill.style.height = `${hit.height}px`;
+  pill.style.transform = `translate(${hit.left - box.left}px, ${hit.top - box.top}px)`;
+}
+
+function syncTabPill(animate = true) {
+  syncSegPill(document.querySelector(".tabs"), '.tab[aria-selected="true"]', animate);
+}
+
+function syncKindPills(animate = true) {
+  document.querySelectorAll(".kind-toggle").forEach((root) => {
+    syncSegPill(root, '.kind[aria-pressed="true"]', animate);
+  });
+}
+
+function schedulePills(animate = true) {
+  requestAnimationFrame(() => {
+    syncTabPill(animate);
+    syncKindPills(animate);
+  });
+}
+
+const UNIT_ORDER = ["in", "ft", "'", '"', "°"];
+let deskUnitHint = "";
+
+function currentDeskUnit() {
+  if (desk.kind === "angle") return "°";
+  if (deskUnitHint === "'" || deskUnitHint === '"') return deskUnitHint;
+  return "in";
+}
+
+function unitDir(prev, next) {
+  return UNIT_ORDER.indexOf(next) >= UNIT_ORDER.indexOf(prev) ? 1 : -1;
+}
+
+function spinReel(reel, next, dir = 1) {
+  if (!reel) return;
+  const safe = escapeHtml(next);
+  let view = reel.querySelector(".unit-reel-view");
+  let track = reel.querySelector(".unit-reel-track");
+  if (!view || !track) {
+    reel.innerHTML = `<span class="unit-reel-view"><span class="unit-reel-track"><span class="unit-reel-item">${safe}</span></span></span>`;
+    return;
+  }
+  const items = [...track.querySelectorAll(".unit-reel-item")];
+  const prev = (items[items.length - 1] || items[0])?.textContent?.trim() || "";
+  if (prev === next && items.length === 1) return;
+  if (!motionOk()) {
+    track.style.transition = "none";
+    track.innerHTML = `<span class="unit-reel-item">${safe}</span>`;
+    track.style.transform = "translateY(0)";
+    return;
+  }
+  const old = escapeHtml(prev || next);
+  track.style.transition = "none";
+  if (dir > 0) {
+    track.innerHTML = `<span class="unit-reel-item">${old}</span><span class="unit-reel-item">${safe}</span>`;
+    track.style.transform = "translateY(0)";
+    void track.offsetWidth;
+    track.style.transition = "";
+    track.style.transform = "translateY(-50%)";
+  } else {
+    track.innerHTML = `<span class="unit-reel-item">${safe}</span><span class="unit-reel-item">${old}</span>`;
+    track.style.transform = "translateY(-50%)";
+    void track.offsetWidth;
+    track.style.transition = "";
+    track.style.transform = "translateY(0)";
+  }
+  const done = () => {
+    track.style.transition = "none";
+    track.innerHTML = `<span class="unit-reel-item">${safe}</span>`;
+    track.style.transform = "translateY(0)";
+    track.removeEventListener("transitionend", onEnd);
+  };
+  const onEnd = (event) => {
+    if (event.target === track) done();
+  };
+  track.addEventListener("transitionend", onEnd);
+  window.setTimeout(done, 380);
+}
+
+window.addEventListener("resize", () => schedulePills(false));
+
 function toast(text) {
   toastEl.textContent = text;
   toastEl.classList.add("show");
   window.clearTimeout(toastEl._t);
   toastEl._t = window.setTimeout(() => toastEl.classList.remove("show"), 2200);
 }
+
+function closeSheet(el) {
+  if (!el || !el.open) return Promise.resolve();
+  if (!motionOk() || el.classList.contains("is-closing")) {
+    el.classList.remove("is-closing");
+    if (el.open) el.close();
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      el.classList.remove("is-closing");
+      if (el.open) el.close();
+      resolve();
+    };
+    el.classList.add("is-closing");
+    el.addEventListener("animationend", (event) => {
+      if (event.target === el) done();
+    }, { once: true });
+    window.setTimeout(done, 220);
+  });
+}
+
+function haptic(kind = "light") {
+  if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") return;
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  const ms =
+    kind === "success"
+      ? [14, 32, 18]
+      : kind === "medium"
+        ? 22
+        : kind === "warn"
+          ? [16, 28, 16]
+          : 12;
+  try {
+    navigator.vibrate(ms);
+  } catch {
+    /* Safari and locked devices ignore this. */
+  }
+}
+
+document.addEventListener(
+  "pointerdown",
+  (event) => {
+    const btn = event.target.closest?.("button, select");
+    if (!btn || btn.disabled) return;
+    btn.classList.add("is-press");
+    const heavy =
+      btn.classList.contains("solid") ||
+      btn.classList.contains("eq") ||
+      btn.classList.contains("tab") ||
+      btn.id === "pipe-done";
+    haptic(heavy ? "medium" : "light");
+  },
+  { passive: true }
+);
+
+function clearPress() {
+  document.querySelectorAll(".is-press").forEach((el) => el.classList.remove("is-press"));
+}
+
+document.addEventListener("pointerup", clearPress, { passive: true });
+document.addEventListener("pointercancel", clearPress, { passive: true });
 
 let confirmResolve = null;
 
@@ -205,32 +375,26 @@ function askConfirm(message, actionLabel = "Clear") {
     confirmResolve = resolve;
     confirmMsg.textContent = message;
     confirmOk.textContent = actionLabel;
-    const finish = (ok) => {
+    const finish = async (ok) => {
       const done = confirmResolve;
       confirmResolve = null;
       confirmOk.onclick = null;
       confirmCancel.onclick = null;
-      if (confirmDialog.open) confirmDialog.close();
+      await closeSheet(confirmDialog);
       if (done) done(ok);
     };
     confirmOk.onclick = () => finish(true);
     confirmCancel.onclick = () => finish(false);
     confirmDialog.showModal();
-    confirmDialog.style.position = "fixed";
-    confirmDialog.style.top = "50%";
-    confirmDialog.style.left = "50%";
-    confirmDialog.style.transform = "translate(-50%, -50%)";
   });
 }
 
 confirmDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
-  if (confirmResolve) {
-    const done = confirmResolve;
-    confirmResolve = null;
-    confirmDialog.close();
-    done(false);
-  }
+  if (!confirmResolve) return;
+  const done = confirmResolve;
+  confirmResolve = null;
+  closeSheet(confirmDialog).then(() => done(false));
 });
 
 function currentKnown() {
@@ -364,7 +528,7 @@ function svgToWorkspace(x, y) {
 function placeControls(layout) {
   const { w, h } = viewSize();
   return {
-    boxes: placeAttachedChips(layout, { w: 152, h: 82 }, { w, h, pad: 4 }, 28),
+    boxes: placeAttachedChips(layout, { w: 152, h: 82 }, { w, h, pad: 4, top: 48 }, 28),
   };
 }
 
@@ -503,18 +667,15 @@ function openSave(key) {
       : `${LABELS[key]} · ${angleConversions(value).degrees}`;
   saveName.value = LABELS[key];
   dialog.showModal();
-  dialog.style.position = "fixed";
-  dialog.style.top = "50%";
-  dialog.style.left = "50%";
-  dialog.style.right = "auto";
-  dialog.style.bottom = "auto";
-  dialog.style.margin = "0";
-  dialog.style.transform = "translate(-50%, -50%)";
   saveName.focus();
   saveName.select();
 }
 
-document.getElementById("save-cancel").addEventListener("click", () => dialog.close());
+document.getElementById("save-cancel").addEventListener("click", () => closeSheet(dialog));
+dialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeSheet(dialog);
+});
 
 document.getElementById("save-form").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -529,8 +690,7 @@ document.getElementById("save-form").addEventListener("submit", (event) => {
     value: state.saveTarget.value,
   });
   persist();
-  dialog.close();
-  toast("Saved to this device");
+  closeSheet(dialog).then(() => toast("Saved to this device"));
   renderBank();
 });
 
@@ -591,6 +751,7 @@ function resetDesk() {
   desk.entry = "";
   desk.expr = "";
   desk.fresh = true;
+  deskUnitHint = "";
 }
 
 function parseDesk() {
@@ -639,16 +800,21 @@ function deskConvText() {
 
 function renderDesk() {
   if (calcExpr) calcExpr.textContent = desk.expr;
-  if (calcUnit) calcUnit.textContent = desk.kind === "length" ? "in" : "°";
+  if (calcUnit) {
+    const next = currentDeskUnit();
+    const prev = calcUnit.querySelector(".unit-reel-item")?.textContent?.trim() || "";
+    spinReel(calcUnit, next, unitDir(prev, next));
+  }
   if (calcEntry && document.activeElement !== calcEntry) {
     calcEntry.value = desk.entry || "0";
   } else if (calcEntry && desk.fresh && document.activeElement !== calcEntry) {
     calcEntry.value = desk.entry || "0";
   }
   if (calcConv) calcConv.textContent = deskConvText();
-  document.querySelectorAll(".kind").forEach((el) => {
+  document.querySelectorAll("[data-kind]").forEach((el) => {
     el.setAttribute("aria-pressed", String(el.dataset.kind === desk.kind));
   });
+  schedulePills(true);
 }
 
 function renderCalc() {
@@ -671,6 +837,7 @@ function renderCalc() {
 }
 
 function typeKey(ch) {
+  if (ch === "'" || ch === '"') deskUnitHint = ch;
   if (desk.fresh) desk.entry = ch === "." ? "0." : ch;
   else desk.entry += ch;
   desk.fresh = false;
@@ -812,6 +979,7 @@ document.getElementById("clear-calc").addEventListener("click", async () => {
 });
 
 precisionEl.addEventListener("change", () => {
+  haptic("medium");
   state.precision = Number(precisionEl.value);
   persist();
   refresh();
@@ -824,18 +992,41 @@ ssaEl.addEventListener("click", (event) => {
   refresh();
 });
 
+const TAB_ORDER = ["combine", "triangle", "pipe", "distance"];
+
 function setTab(tab) {
+  const from = TAB_ORDER.indexOf(state.tab);
+  const to = TAB_ORDER.indexOf(tab);
+  const dir = to > from ? "fwd" : to < from ? "back" : "";
   state.tab = tab;
   if (tab !== "pipe") setPipeLive(false);
   persist();
-  viewLabel.textContent = TAB_LABEL[tab];
+  if (viewLabel) {
+    viewLabel.textContent = TAB_LABEL[tab];
+    if (dir && motionOk()) {
+      viewLabel.classList.remove("is-swap");
+      void viewLabel.offsetWidth;
+      viewLabel.classList.add("is-swap");
+    }
+  }
   document.querySelectorAll(".tab").forEach((btn) => {
     btn.setAttribute("aria-selected", String(btn.dataset.tab === tab));
   });
-  document.getElementById("view-triangle").hidden = tab !== "triangle";
-  document.getElementById("view-combine").hidden = tab !== "combine";
-  document.getElementById("view-pipe").hidden = tab !== "pipe";
-  document.getElementById("view-distance").hidden = tab !== "distance";
+  schedulePills(Boolean(dir));
+  const views = {
+    triangle: "view-triangle",
+    combine: "view-combine",
+    pipe: "view-pipe",
+    distance: "view-distance",
+  };
+  Object.entries(views).forEach(([name, id]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const on = name === tab;
+    el.hidden = !on;
+    if (on && dir) el.dataset.enter = dir;
+    else el.removeAttribute("data-enter");
+  });
   document.querySelector(".app")?.classList.toggle("is-calc", tab === "combine");
   if (tab === "triangle") refresh();
   if (tab === "combine") renderCalc();
@@ -862,15 +1053,24 @@ if (distToEl) {
   });
 }
 
+document.querySelectorAll("[data-face]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    state.distFace = btn.dataset.face === "inside" || btn.dataset.face === "outside" ? btn.dataset.face : "center";
+    persist();
+    renderDistance();
+  });
+});
+
 function setCalcKind(kind, keep = false) {
   const next = kind === "angle" ? "angle" : "length";
   if (next !== desk.kind && !keep) resetDesk();
   desk.kind = next;
+  if (next === "angle") deskUnitHint = "";
   if (calcEntry) calcEntry.setAttribute("inputmode", next === "length" ? "text" : "decimal");
   renderDesk();
 }
 
-document.querySelectorAll(".kind").forEach((btn) => {
+document.querySelectorAll("[data-kind]").forEach((btn) => {
   btn.addEventListener("click", () => setCalcKind(btn.dataset.kind));
 });
 
@@ -943,9 +1143,10 @@ function parsedPipeSteps() {
   state.pipe.steps.forEach((step, i) => {
     if (step.type === "straight") {
       const len = parseLength(step.raw);
+      const fitting = step.fit?.field === "length";
       if (len.error || !(len.inches > 0)) {
-        errors.push(`Straight ${i + 1} needs a length.`);
-        steps.push({ ...step, length: 0 });
+        if (!fitting) errors.push(`Straight ${i + 1} needs a length.`);
+        steps.push({ ...step, length: fitting ? 8 : 0 });
         return;
       }
       steps.push({ ...step, length: len.inches });
@@ -991,7 +1192,7 @@ function parsedPipeSteps() {
       miter: Math.abs(ang.degrees) / 2,
     });
   });
-  return {
+  const parsed = {
     clr: clr.inches,
     od: od.inches,
     startAngle: startA.degrees || 0,
@@ -999,6 +1200,99 @@ function parsedPipeSteps() {
     steps,
     errors,
   };
+  applyFits(parsed);
+  return parsed;
+}
+
+function pipeStart(parsed) {
+  const first = state.pipe.steps[0];
+  const firstTurn = first?.type === "bend" || first?.type === "joint";
+  return {
+    angle: parsed.startAngle || 0,
+    rotation: firstTurn ? parsed.startRot || 0 : 0,
+    firstBend: firstTurn,
+  };
+}
+
+function modelFromSteps(parsed, steps = parsed.steps) {
+  const od = parsed.od > 0 ? parsed.od : 0;
+  return buildPipe(parsed.clr || 3, steps, od, pipeStart(parsed));
+}
+
+function fitFace() {
+  return state.distFace === "inside" || state.distFace === "outside" ? state.distFace : "center";
+}
+
+function formatSolvedAngle(deg) {
+  const r = Math.round(deg * 100) / 100;
+  if (Math.abs(r - Math.round(r)) < 1e-6) return String(Math.round(r));
+  return formatDecimal(r, 2);
+}
+
+function applyFits(parsed) {
+  for (const step of state.pipe.steps) {
+    if (!step.fit) continue;
+    const target = parseLength(step.fit.raw);
+    const found = parsed.steps.find((item) => item.id === step.id);
+    if (!found) continue;
+    if (target.error || !(target.inches > 0)) {
+      found.fitMiss = true;
+      found.fitNote = "Enter a distance to land.";
+      continue;
+    }
+    const result = solveFitValue(
+      (steps) => modelFromSteps(parsed, steps),
+      parsed,
+      step,
+      { ...step.fit, face: fitFace() },
+      target.inches
+    );
+    if (!result) continue;
+    if (result.hit) {
+      if (step.fit.field === "angle") found.angle = result.value;
+      else found.length = result.value;
+    } else if (step.fit.field === "angle") {
+      const fallback = Number.isFinite(step.fit.base) ? step.fit.base : result.value;
+      found.angle = wrapShopAngle(fallback, step.type);
+    } else if (Number.isFinite(step.fit.base) && step.fit.base > 0) {
+      found.length = step.fit.base;
+    }
+    found.fitMiss = !result.hit;
+    found.fitDead = Boolean(result.dead);
+    found.fitClosest = result.error < Infinity ? lengthConversions(Math.max(0, pairDistance(modelFromSteps(parsed), step.fit.from, step.fit.to, step.fit.path, fitFace())), state.precision).fractionalInches : "";
+    if (result.dead) {
+      found.fitNote = "This piece doesn’t change that distance.";
+    } else if (!result.hit) {
+      found.fitNote = `Can’t reach ${lengthConversions(target.inches, state.precision).fractionalInches}`;
+    } else {
+      found.fitNote = "";
+    }
+  }
+}
+
+function syncFitRaws(parsed) {
+  const active = document.activeElement;
+  let changed = false;
+  for (const step of state.pipe.steps) {
+    if (!step.fit) continue;
+    const found = parsed.steps.find((item) => item.id === step.id);
+    if (!found || found.fitDead) continue;
+    if (step.fit.field === "angle" && Number.isFinite(found.angle) && Math.abs(found.angle) > 1e-6) {
+      const next = formatSolvedAngle(found.angle);
+      if (step.angleRaw !== next && active?.dataset.angle !== step.id) {
+        step.angleRaw = next;
+        changed = true;
+      }
+    }
+    if (step.fit.field === "length" && found.length > 0) {
+      const next = formatInchesFraction(found.length, state.precision);
+      if (step.raw !== next && active?.dataset.straight !== step.id && active?.dataset.len !== step.id) {
+        step.raw = next;
+        changed = true;
+      }
+    }
+  }
+  if (changed) persist();
 }
 
 function pipeSvgToWorkspace(x, y) {
@@ -1031,17 +1325,27 @@ function updatePipeStepConvs(parsed) {
   }
   pipeStepsEl.querySelectorAll("[data-straight], [data-len]").forEach((input) => {
     const id = input.dataset.straight || input.dataset.len;
+    const live = state.pipe.steps.find((s) => s.id === id);
     const step = parsed.steps.find((s) => s.id === id);
     const conv = input.closest("label")?.querySelector(".conv");
-    if (conv) conv.textContent = step?.length ? lengthConvLine(step.length) : "";
+    if (conv) {
+      conv.textContent = step?.fitNote || (step?.length ? lengthConvLine(step.length) : "");
+    }
+    if (live?.fit?.field === "length" && step?.length > 0 && document.activeElement !== input) {
+      input.value = formatInchesFraction(step.length, state.precision);
+    }
   });
   pipeStepsEl.querySelectorAll("[data-angle]").forEach((input) => {
+    const live = state.pipe.steps.find((s) => s.id === input.dataset.angle);
     const step = parsed.steps.find((s) => s.id === input.dataset.angle);
     const label = input.closest("label");
     const conv = label?.querySelector(".conv");
-    if (conv) conv.textContent = step?.angle ? angleConvLine(step.angle) : "";
+    if (conv) conv.textContent = step?.fitNote || (step?.angle ? angleConvLine(step.angle) : "");
     const miter = label?.querySelector(".miter");
     if (miter) miter.textContent = step?.type === "joint" && step.angle ? miterLine(step) : "";
+    if (live?.fit?.field === "angle" && Number.isFinite(step?.angle) && document.activeElement !== input) {
+      input.value = formatSolvedAngle(step.angle);
+    }
   });
   pipeStepsEl.querySelectorAll("[data-rot]").forEach((input) => {
     const step = parsed.steps.find((s) => s.id === input.dataset.rot);
@@ -1060,6 +1364,54 @@ function updatePipeStepConvs(parsed) {
   }
 }
 
+function ifButton(step, field) {
+  const on = step.fit?.field === field;
+  return `<button class="glass compact if-btn" type="button" data-if="${step.id}" data-if-field="${field}" aria-pressed="${on}">Tape</button>`;
+}
+
+function cageMoveBtns(index, total, name) {
+  if (total < 2) return "";
+  return `<div class="cage-move">
+    <button class="icon-btn" type="button" data-move="up" aria-label="Move ${name} up" ${index === 0 ? "disabled" : ""}>
+      <svg class="mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 9.6 8 5.6 12 9.6" /></svg>
+    </button>
+    <button class="icon-btn" type="button" data-move="down" aria-label="Move ${name} down" ${index === total - 1 ? "disabled" : ""}>
+      <svg class="mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.4 8 10.4 12 6.4" /></svg>
+    </button>
+  </div>`;
+}
+
+function ifPanel(step, stations) {
+  if (!step.fit) return "";
+  const fit = step.fit;
+  const fromOpts = stations
+    .map((s) => `<option value="${s.id}"${s.id === fit.from ? " selected" : ""}>${escapeHtml(s.name)}</option>`)
+    .join("");
+  const toOpts = stations
+    .map((s) => `<option value="${s.id}"${s.id === fit.to ? " selected" : ""}>${escapeHtml(s.name)}</option>`)
+    .join("");
+  return `<div class="if-panel cage-span">
+    <div class="dist-pick if-pick">
+      <label>From
+        <select data-if-from="${step.id}">${fromOpts}</select>
+      </label>
+      <label>To
+        <select data-if-to="${step.id}">${toOpts}</select>
+      </label>
+    </div>
+    <label>Distance
+      <div class="unit-field">
+        <input data-if-dist="${step.id}" value="${escapeHtml(fit.raw)}" placeholder="36" inputmode="text" />
+        <span class="unit">in</span>
+      </div>
+    </label>
+    <div class="kind-toggle if-path" role="group" aria-label="How to measure">
+      <button class="kind" type="button" data-if-path="${step.id}" data-path="space" aria-pressed="${fit.path !== "along"}">Space</button>
+      <button class="kind" type="button" data-if-path="${step.id}" data-path="along" aria-pressed="${fit.path === "along"}">Along</button>
+    </div>
+  </div>`;
+}
+
 function degField(label, attr, value, shown) {
   return `<label>${label}
     <div class="unit-field">
@@ -1074,6 +1426,8 @@ function renderPipeList(parsed) {
   let straightN = 0;
   let bendN = 0;
   let jointN = 0;
+  const stations = modelFromSteps(parsed).stations || [];
+  const total = state.pipe.steps.length;
   pipeStepsEl.innerHTML = state.pipe.steps
     .map((step, index) => {
       const found = parsed.steps.find((s) => s.id === step.id);
@@ -1094,21 +1448,23 @@ function renderPipeList(parsed) {
         straightN += 1;
         return `<li class="cage-card" data-id="${step.id}">
           <header>
-            <button class="icon-btn cage-handle" type="button" aria-label="Drag straight ${straightN}" tabindex="-1">
-              <span class="sort-lines" aria-hidden="true"></span>
-            </button>
             <h3>Straight ${straightN}</h3>
+            ${cageMoveBtns(index, total, `straight ${straightN}`)}
             <button class="icon-btn" type="button" data-drop="${step.id}" aria-label="Remove straight ${straightN}">×</button>
           </header>
           <div class="cage-fields${first ? "" : " single"}">
-            <label>Length
+            <label>
+              <span class="field-lab">Length ${ifButton(step, "length")}</span>
               <div class="unit-field">
-                <input data-straight="${step.id}" value="${escapeHtml(step.raw)}" placeholder="12" inputmode="text" />
+                <input data-straight="${step.id}" value="${escapeHtml(step.raw)}" placeholder="12" inputmode="text" ${
+                  step.fit?.field === "length" ? "readonly" : ""
+                } />
                 <span class="unit">in</span>
               </div>
-              <p class="conv">${found?.length ? lengthConvLine(found.length) : ""}</p>
+              <p class="conv">${found?.fitNote || (found?.length ? lengthConvLine(found.length) : "")}</p>
             </label>
             ${first ? sitAng : ""}
+            ${ifPanel(step, stations)}
           </div>
         </li>`;
       }
@@ -1119,10 +1475,8 @@ function renderPipeList(parsed) {
       const name = isJoint ? `Joint ${n}` : `Bend ${n}`;
       return `<li class="cage-card" data-id="${step.id}">
         <header>
-          <button class="icon-btn cage-handle" type="button" aria-label="Drag ${name}" tabindex="-1">
-            <span class="sort-lines" aria-hidden="true"></span>
-          </button>
           <h3>${name}</h3>
+          ${cageMoveBtns(index, total, name)}
           <button class="icon-btn" type="button" data-drop="${step.id}" aria-label="Remove ${name}">×</button>
         </header>
         <div class="cage-fields">
@@ -1130,21 +1484,27 @@ function renderPipeList(parsed) {
           ${first ? sitRot : ""}
           ${
             isJoint
-              ? `<label class="cage-span">Length
+              ? `<label class="cage-span">
+              <span class="field-lab">Length ${ifButton(step, "length")}</span>
               <div class="unit-field">
-                <input data-len="${step.id}" value="${escapeHtml(step.raw || "")}" placeholder="2" inputmode="text" />
+                <input data-len="${step.id}" value="${escapeHtml(step.raw || "")}" placeholder="2" inputmode="text" ${
+                  step.fit?.field === "length" ? "readonly" : ""
+                } />
                 <span class="unit">in</span>
               </div>
-              <p class="conv">${found?.length ? lengthConvLine(found.length) : ""}</p>
+              <p class="conv">${step.fit?.field === "length" ? found?.fitNote || "" : found?.length ? lengthConvLine(found.length) : ""}</p>
             </label>`
               : ""
           }
-          <label>${isJoint ? "Joint" : "Bend"}
+          <label>
+            <span class="field-lab">${isJoint ? "Joint" : "Bend"} ${ifButton(step, "angle")}</span>
             <div class="unit-field">
-              <input data-angle="${step.id}" value="${escapeHtml(step.angleRaw)}" placeholder="90" inputmode="decimal" />
+              <input data-angle="${step.id}" value="${escapeHtml(step.angleRaw)}" placeholder="90" inputmode="decimal" ${
+                step.fit?.field === "angle" ? "readonly" : ""
+              } />
               <span class="unit">°</span>
             </div>
-            <p class="conv">${found?.angle ? angleConvLine(found.angle) : ""}</p>
+            <p class="conv">${step.fit?.field === "angle" ? found?.fitNote || "" : found?.angle ? angleConvLine(found.angle) : ""}</p>
             ${isJoint ? `<p class="conv miter">${found?.angle ? miterLine(found) : ""}</p>` : ""}
           </label>
           <label>Clock
@@ -1154,11 +1514,11 @@ function renderPipeList(parsed) {
             </div>
             <p class="conv">${Number.isFinite(found?.rotation) ? angleConvLine(found.rotation) : ""}</p>
           </label>
+          ${ifPanel(step, stations)}
         </div>
       </li>`;
     })
     .join("");
-  syncCageSort();
 }
 
 function setPickDist(on) {
@@ -1173,11 +1533,13 @@ function pickStation(id) {
   if (!pickDist || !id) return;
   if (pickIds.includes(id)) {
     pickIds = [];
+    haptic("light");
     renderPipe(false);
     return;
   }
   if (!pickIds.length) {
     pickIds = [id];
+    haptic("light");
     renderPipe(false);
     return;
   }
@@ -1187,6 +1549,7 @@ function pickStation(id) {
   pickIds = [];
   if (distPickBtn) distPickBtn.setAttribute("aria-pressed", "false");
   if (pipeWorkspace) pipeWorkspace.classList.remove("is-picking");
+  haptic("success");
   persist();
   setTab("distance");
 }
@@ -1221,8 +1584,12 @@ function pipeViewOffFrame() {
   return Math.abs(view.zoom - 1) > 0.03 || Math.hypot(view.panX, view.panY) > 8;
 }
 
-function syncPipeFrameBtn() {
-  if (pipeRecenter) pipeRecenter.hidden = !pipeViewOffFrame();
+function syncPipeChrome() {
+  const live = pipeLive;
+  if (distPickBtn) distPickBtn.hidden = !live;
+  if (pipeDone) pipeDone.hidden = !live;
+  if (pipeRecenter) pipeRecenter.hidden = !(live && pipeViewOffFrame());
+  document.querySelector(".pipe-chrome")?.toggleAttribute("hidden", !live);
 }
 
 function applyPipeView(next, save = false) {
@@ -1305,18 +1672,25 @@ function renderPipePreview(parsed) {
       return `<circle class="${cls}" cx="${m.x}" cy="${m.y}" r="${r}" />`;
     })
     .join("");
+  const ifFits = activeFitSpans();
+  const ifIds = new Set(ifFits.flatMap((fit) => [fit.from, fit.to]));
   const stationMarks = [...(laid.stations || [])]
     .sort((a, b) => (b.z ?? 0) - (a.z ?? 0))
     .map((s) => {
       const r = Math.max(pickDist ? 12 : 8, Math.min(pickDist ? 15 : 11, dotR + (pickDist ? 5 : 2)));
       const hit = pickDist ? 26 : 18;
       const picked = pickDist && pickIds.includes(s.id);
-      return `<g class="station${picked ? " is-picked" : ""}" data-station="${escapeHtml(s.id)}" transform="translate(${Number(s.x).toFixed(1)} ${Number(s.y).toFixed(1)})">
+      const ifPair = ifIds.has(s.id);
+      return `<g class="station${picked ? " is-picked" : ""}${ifPair ? " is-if" : ""}" data-station="${escapeHtml(s.id)}" transform="translate(${Number(s.x).toFixed(1)} ${Number(s.y).toFixed(1)})">
         <circle class="station-hit" r="${hit}" />
         <circle class="station-halo" r="${r.toFixed(1)}" />
         <text class="station-lab" dy="0.35em">${escapeHtml(s.name)}</text>
       </g>`;
     })
+    .join("");
+  const ifSpans = ifFits
+    .map((fit) => ifSpanMarkup(model, laid, fit))
+    .filter(Boolean)
     .join("");
 
   const mid = laid.marks.reduce(
@@ -1378,9 +1752,9 @@ function renderPipePreview(parsed) {
     ? `<path class="floor-fill" d="${laid.floor.fill}" /><path class="floor-grid" d="${laid.floor.grid}" /><path class="floor-edge" d="${laid.floor.edge}" />`
     : "";
   pipeSvg.innerHTML = laid.d
-    ? `${floor}${leaders}<path class="tube" d="${laid.d}" style="stroke-width:${stroke.toFixed(2)}" />${inner > 0.25 ? `<path class="tube-soft" d="${laid.d}" style="stroke-width:${inner.toFixed(2)}" />` : ""}${dots}${stationMarks}`
-    : `${floor}${leaders}`;
-  syncPipeFrameBtn();
+    ? `${floor}${leaders}<path class="tube" d="${laid.d}" style="stroke-width:${stroke.toFixed(2)}" />${inner > 0.25 ? `<path class="tube-soft" d="${laid.d}" style="stroke-width:${inner.toFixed(2)}" />` : ""}${dots}${ifSpans}${stationMarks}`
+    : `${floor}${leaders}${ifSpans}`;
+  syncPipeChrome();
 
   if (msgs.length) {
     pipeResult.innerHTML = `<p class="err">${msgs[0]}</p>`;
@@ -1412,27 +1786,23 @@ function renderPipePreview(parsed) {
 function renderPipe(rebuildList = false) {
   if (!pipeClr) return;
   const parsed = parsedPipeSteps();
+  syncFitRaws(parsed);
   if (document.activeElement !== pipeClr) pipeClr.value = state.pipe.clrRaw;
   if (pipeOd && document.activeElement !== pipeOd) pipeOd.value = state.pipe.odRaw || "";
   updatePipeStepConvs(parsed);
   if (rebuildList) {
-    if (pipeStepsEl.contains(document.activeElement)) document.activeElement.blur();
+    if (pipeStepsEl.contains(document.activeElement) && !document.activeElement?.closest("[data-if-dist]")) {
+      document.activeElement.blur();
+    }
     renderPipeList(parsed);
   }
   renderPipePreview(parsed);
   renderDistance();
+  schedulePills(false);
 }
 
 function currentPipeModel() {
-  const parsed = parsedPipeSteps();
-  const od = parsed.od > 0 ? parsed.od : 0;
-  const first = state.pipe.steps[0];
-  const firstTurn = first?.type === "bend" || first?.type === "joint";
-  return buildPipe(parsed.clr || 3, parsed.steps, od, {
-    angle: parsed.startAngle || 0,
-    rotation: firstTurn ? parsed.startRot || 0 : 0,
-    firstBend: firstTurn,
-  });
+  return modelFromSteps(parsedPipeSteps());
 }
 
 function currentStations() {
@@ -1481,8 +1851,18 @@ function legsBetween(legs, stations, fromId, toId) {
   return (legs || []).filter((leg) => span.has(leg.from) && span.has(leg.to) && (leg.length || 0) > 1e-9);
 }
 
+function syncDistFace() {
+  const face = state.distFace === "inside" || state.distFace === "outside" ? state.distFace : "center";
+  document.querySelectorAll("[data-face]").forEach((btn) => {
+    btn.setAttribute("aria-pressed", String(btn.dataset.face === face));
+  });
+  schedulePills(true);
+  return face;
+}
+
 function renderDistance() {
   if (!distFromEl || !distToEl) return;
+  syncDistFace();
   const model = currentPipeModel();
   const stations = model.stations || [];
   const ids = new Set(stations.map((s) => s.id));
@@ -1518,6 +1898,10 @@ function renderDistance() {
   const pieces = legsBetween(model.legs, stations, from.id, to.id);
   const alongInside = along - pieces.reduce((sum, leg) => sum + ((leg.length || 0) - (leg.inside ?? leg.length ?? 0)), 0);
   const alongOutside = along + pieces.reduce((sum, leg) => sum + ((leg.outside ?? leg.length ?? 0) - (leg.length || 0)), 0);
+  const face = syncDistFace();
+  const faceLabel = face === "inside" ? "Inside to inside" : face === "outside" ? "Outside to outside" : "Center to center";
+  const straightShown = face === "inside" ? straight - od : face === "outside" ? straight + od : straight;
+  const alongShown = face === "inside" ? alongInside : face === "outside" ? alongOutside : along;
   const pieceRows = pieces
     .map((leg) => {
       const note =
@@ -1534,18 +1918,22 @@ function renderDistance() {
   distResult.innerHTML = `<div class="total">
     <p class="equation">${from.name} to ${to.name}</p>
     <p class="dist-kind">Straight-line · through space</p>
-    ${distRow("Center to center", straight, true)}
-    ${distRow("Inside to inside", straight - od)}
-    ${distRow("Outside to outside", straight + od)}
+    ${distRow(faceLabel, straightShown, true)}
     <p class="dist-kind">Along pipe</p>
-    ${distRow("Center to center", along, true)}
-    ${distRow("Inside to inside", alongInside)}
-    ${distRow("Outside to outside", alongOutside)}
+    ${distRow(faceLabel, alongShown, true)}
   </div>`;
+  const faceWork =
+    face === "inside"
+      ? `<p class="work-line">OD = ${inchMark(od)}</p>
+        <p class="work-line">Inside to inside = d − OD = ${straightShown < -1e-9 ? "—" : inchMark(straightShown)}</p>`
+      : face === "outside"
+        ? `<p class="work-line">OD = ${inchMark(od)}</p>
+        <p class="work-line">Outside to outside = d + OD = ${inchMark(straightShown)}</p>`
+        : `<p class="work-line">Center to center d = √(ΔX² + ΔY² + ΔZ²)</p>`;
   if (distWork) {
     distWork.innerHTML = `<p class="equation">${escapeHtml(from.name)} to ${escapeHtml(to.name)}</p>
       <div class="work">
-        <p class="work-kicker">Straight-line</p>
+        <p class="work-kicker">Straight-line · ${faceLabel.toLowerCase()}</p>
         <p class="work-line">ΔX = ${signedInch(dx)}</p>
         <p class="work-line">ΔY = ${signedInch(dy)}</p>
         <p class="work-line">ΔZ = ${signedInch(dz)}</p>
@@ -1553,22 +1941,17 @@ function renderDistance() {
         <p class="work-line">= √(${formatDecimal(dx, 3)}² + ${formatDecimal(dy, 3)}² + ${formatDecimal(dz, 3)}²)</p>
         <p class="work-line">= √(${formatDecimal(dx * dx, 3)} + ${formatDecimal(dy * dy, 3)} + ${formatDecimal(dz * dz, 3)})</p>
         <p class="work-line">= √${formatDecimal(sumSq, 3)} = ${formatDecimal(straight, 3)} in</p>
-        <p class="work-line">OD = ${inchMark(od)}</p>
-        <p class="work-line">Inside to inside = d − OD = ${straight - od < -1e-9 ? "—" : inchMark(straight - od)}</p>
-        <p class="work-line">Outside to outside = d + OD = ${inchMark(straight + od)}</p>
+        ${faceWork}
       </div>
       <div class="work">
-        <p class="work-kicker">Along pipe</p>
+        <p class="work-kicker">Along pipe · ${faceLabel.toLowerCase()}</p>
         <p class="work-line">Center to center at ${escapeHtml(from.name)} = ${inchMark(alongA)}</p>
         <p class="work-line">Center to center at ${escapeHtml(to.name)} = ${inchMark(alongB)}</p>
         <p class="work-line">|${inchMark(alongB)} − ${inchMark(alongA)}| = ${inchMark(along)}</p>
-        <p class="work-line">Inside to inside = ${inchMark(alongInside)}</p>
-        <p class="work-line">Outside to outside = ${inchMark(alongOutside)}</p>
+        <p class="work-line">${faceLabel} = ${inchMark(alongShown)}</p>
         ${
           pieceRows
-            ? `<div class="work-pieces">${pieceRows}<div class="work-row work-sum"><span></span><span>Center to center</span><span>${inchMark(along)}</span></div>
-            <div class="work-row work-sum"><span></span><span>Inside to inside</span><span>${inchMark(alongInside)}</span></div>
-            <div class="work-row work-sum"><span></span><span>Outside to outside</span><span>${inchMark(alongOutside)}</span></div></div>`
+            ? `<div class="work-pieces">${pieceRows}<div class="work-row work-sum"><span></span><span>${faceLabel}</span><span>${inchMark(alongShown)}</span></div></div>`
             : ""
         }
       </div>`;
@@ -1583,17 +1966,25 @@ pipeStepsEl.addEventListener("input", (event) => {
   const rot = event.target.closest("[data-rot]");
   const startAng = event.target.closest("[data-start-angle]");
   const startRotEl = event.target.closest("[data-start-rot]");
+  const ifDist = event.target.closest("[data-if-dist]");
+  if (ifDist) {
+    const step = state.pipe.steps.find((item) => item.id === ifDist.dataset.ifDist);
+    if (step?.fit) step.fit.raw = ifDist.value;
+    persist();
+    renderPipe(false);
+    return;
+  }
   if (straight) {
     const step = state.pipe.steps.find((item) => item.id === straight.dataset.straight);
-    if (step) step.raw = straight.value;
+    if (step && step.fit?.field !== "length") step.raw = straight.value;
   }
   if (jointLen) {
     const step = state.pipe.steps.find((item) => item.id === jointLen.dataset.len);
-    if (step) step.raw = jointLen.value;
+    if (step && step.fit?.field !== "length") step.raw = jointLen.value;
   }
   if (angle) {
     const step = state.pipe.steps.find((item) => item.id === angle.dataset.angle);
-    if (step) step.angleRaw = angle.value;
+    if (step && step.fit?.field !== "angle") step.angleRaw = angle.value;
   }
   if (rot) {
     const step = state.pipe.steps.find((item) => item.id === rot.dataset.rot);
@@ -1605,30 +1996,288 @@ pipeStepsEl.addEventListener("input", (event) => {
   renderPipe(false);
 });
 
-let cageDrag = null;
-
-function cageSorting() {
-  return pipeStepsEl?.classList.contains("is-sorting");
+function defaultFitPair() {
+  const stations = currentStations();
+  const ids = stations.map((s) => s.id);
+  let from = ids.includes(state.distFrom) ? state.distFrom : ids[0] || "";
+  let to = ids.includes(state.distTo) ? state.distTo : ids[ids.length - 1] || "";
+  if (from && from === to) to = ids.find((id) => id !== from) || "";
+  return { from, to };
 }
 
-function syncCageSort() {
-  if (!cageSortBtn || !pipeStepsEl) return;
-  const canSort = state.pipe.steps.length > 1;
-  if (!canSort) pipeStepsEl.classList.remove("is-sorting");
-  cageSortBtn.disabled = !canSort;
-  cageSortBtn.setAttribute("aria-pressed", String(canSort && cageSorting()));
+function seedFitRaw(from, to, path) {
+  const inches = pairDistance(currentPipeModel(), from, to, path, fitFace());
+  if (!Number.isFinite(inches) || inches < 0) return "";
+  return formatInchesFraction(inches, state.precision);
 }
 
-if (cageSortBtn) {
-  cageSortBtn.addEventListener("click", () => {
-    if (state.pipe.steps.length < 2) return;
-    pipeStepsEl.classList.toggle("is-sorting");
-    syncCageSort();
+function activeFitSpans() {
+  const seen = new Set();
+  const fits = [];
+  for (const step of state.pipe.steps) {
+    if (!step.fit) continue;
+    const key = `${step.fit.from}|${step.fit.to}|${step.fit.path}`;
+    if (!step.fit.from || !step.fit.to || step.fit.from === step.fit.to || seen.has(key)) continue;
+    seen.add(key);
+    fits.push(step.fit);
+  }
+  return fits;
+}
+
+function closestWorldIndex(pts, station) {
+  let best = 0;
+  let bestD = Infinity;
+  pts.forEach((p, i) => {
+    const d = Math.hypot(p.x - station.x, p.y - station.y, p.z - station.z);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  });
+  return best;
+}
+
+function alongWorldPoints(model, fromId, toId) {
+  const from = (model.stations || []).find((s) => s.id === fromId);
+  const to = (model.stations || []).find((s) => s.id === toId);
+  if (!from || !to) return [];
+  const pts = model.pts || [];
+  if (pts.length < 2) return [from, to];
+  const i = closestWorldIndex(pts, from);
+  const j = closestWorldIndex(pts, to);
+  const lo = Math.min(i, j);
+  const hi = Math.max(i, j);
+  const slice = pts.slice(lo, hi + 1);
+  if (slice.length < 2) return [from, to];
+  return [from, ...slice.slice(1, -1), to];
+}
+
+function pathMid(points) {
+  if (!points.length) return null;
+  if (points.length === 1) return { x: points[0].x, y: points[0].y, angle: 0 };
+  const lens = [];
+  let total = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const len = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    lens.push(len);
+    total += len;
+  }
+  if (total < 1e-6) return { x: points[0].x, y: points[0].y, angle: 0 };
+  let remain = total / 2;
+  for (let i = 1; i < points.length; i += 1) {
+    const len = lens[i - 1];
+    if (remain <= len || i === points.length - 1) {
+      const t = len > 1e-9 ? remain / len : 0;
+      const a = points[i - 1];
+      const b = points[i];
+      let angle = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+      if (angle > 90) angle -= 180;
+      if (angle < -90) angle += 180;
+      return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, angle };
+    }
+    remain -= len;
+  }
+  return { x: points[0].x, y: points[0].y, angle: 0 };
+}
+
+function ifSpanLabel(fit) {
+  const target = parseLength(fit.raw);
+  if (!target.error && target.inches > 0) {
+    return lengthConversions(target.inches, state.precision).fractionalInches;
+  }
+  const inches = pairDistance(currentPipeModel(), fit.from, fit.to, fit.path, fitFace());
+  if (!Number.isFinite(inches) || inches < 0) return "";
+  return lengthConversions(inches, state.precision).fractionalInches;
+}
+
+function ifLabelPoint(mid, points, width, height) {
+  const lift = 13;
+  const rad = ((mid.angle - 90) * Math.PI) / 180;
+  let ox = Math.cos(rad) * lift;
+  let oy = Math.sin(rad) * lift;
+  if (oy > 0) {
+    ox *= -1;
+    oy *= -1;
+  }
+  let x = mid.x + ox;
+  let y = mid.y + oy;
+  const cx = width / 2;
+  const cy = height / 2;
+  if (Math.hypot(x - cx, y - cy) < 52 && points.length >= 2) {
+    const a = points[0];
+    const b = points[points.length - 1];
+    x = a.x + (b.x - a.x) * 0.28 + ox;
+    y = a.y + (b.y - a.y) * 0.28 + oy;
+  }
+  return { x, y, angle: mid.angle };
+}
+
+function ifSpanMarkup(model, laid, fit) {
+  const mapWorld = laid.mapWorld;
+  if (!mapWorld) return "";
+  const world = fit.path === "along" ? alongWorldPoints(model, fit.from, fit.to) : (() => {
+    const from = (model.stations || []).find((s) => s.id === fit.from);
+    const to = (model.stations || []).find((s) => s.id === fit.to);
+    return from && to ? [from, to] : [];
+  })();
+  if (world.length < 2) return "";
+  const points = world.map(mapWorld);
+  const mid = pathMid(points);
+  if (!mid) return "";
+  const at = ifLabelPoint(mid, points, laid.width, laid.height);
+  const d = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
+  const text = ifSpanLabel(fit);
+  const w = Math.max(40, 12 + text.length * 6.6);
+  const h = 18;
+  const label = text
+    ? `<g class="if-span-mark" transform="translate(${at.x.toFixed(1)} ${at.y.toFixed(1)}) rotate(${at.angle.toFixed(1)})">
+        <rect class="if-span-pill" x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h}" rx="9" />
+        <text class="if-span-lab" dy="0.35em">${escapeHtml(text)}</text>
+      </g>`
+    : "";
+  return `<g class="if-span">
+    <path class="if-span-line" d="${d}" />
+    ${label}
+  </g>`;
+}
+
+function toggleStepFit(step, field) {
+  if (step.fit?.field === field) {
+    step.fit = null;
+    return;
+  }
+  const pair = defaultFitPair();
+  const path = step.fit?.path === "along" ? "along" : "space";
+  const from = step.fit?.from || pair.from;
+  const to = step.fit?.to || pair.to;
+  const live = parsedPipeSteps().steps.find((item) => item.id === step.id);
+  const base =
+    field === "angle"
+      ? wrapShopAngle(live?.angle, step.type)
+      : live?.length > 0
+        ? live.length
+        : 8;
+  step.fit = {
+    field,
+    path,
+    from,
+    to,
+    raw: step.fit?.raw || seedFitRaw(from, to, path),
+    base,
+  };
+}
+
+pipeStepsEl.addEventListener("click", (event) => {
+  const ifBtn = event.target.closest("[data-if]");
+  if (ifBtn) {
+    event.preventDefault();
+    const step = state.pipe.steps.find((item) => item.id === ifBtn.dataset.if);
+    if (!step) return;
+    toggleStepFit(step, ifBtn.dataset.ifField === "angle" ? "angle" : "length");
+    persist();
+    renderPipe(true);
+    return;
+  }
+  const pathBtn = event.target.closest("[data-if-path]");
+  if (pathBtn) {
+    const step = state.pipe.steps.find((item) => item.id === pathBtn.dataset.ifPath);
+    if (!step?.fit) return;
+    step.fit.path = pathBtn.dataset.path === "along" ? "along" : "space";
+    persist();
+    renderPipe(true);
+  }
+});
+
+pipeStepsEl.addEventListener("change", (event) => {
+  const from = event.target.closest("[data-if-from]");
+  const to = event.target.closest("[data-if-to]");
+  const el = from || to;
+  if (!el) return;
+  const step = state.pipe.steps.find((item) => item.id === (from?.dataset.ifFrom || to?.dataset.ifTo));
+  if (!step?.fit) return;
+  if (from) step.fit.from = from.value;
+  if (to) step.fit.to = to.value;
+  persist();
+  renderPipe(false);
+});
+
+let cageSwapLock = false;
+
+function cageCardRects() {
+  const map = new Map();
+  pipeStepsEl.querySelectorAll(".cage-card").forEach((el) => {
+    map.set(el.dataset.id, el.getBoundingClientRect());
+  });
+  return map;
+}
+
+function playCageSwap(first, movedId) {
+  if (!first || !motionOk()) return;
+  pipeStepsEl.querySelectorAll(".cage-card").forEach((el) => {
+    const prev = first.get(el.dataset.id);
+    if (!prev) return;
+    const next = el.getBoundingClientRect();
+    const dy = prev.top - next.top;
+    if (Math.abs(dy) < 1) return;
+    const lift = el.dataset.id === movedId;
+    if (lift) el.classList.add("is-swapping");
+    el.style.transition = "none";
+    el.style.transform = `translateY(${dy}px)${lift ? " scale(1.04)" : ""}`;
+    void el.offsetWidth;
+    el.style.transition = "transform 0.46s cubic-bezier(0.22, 1, 0.36, 1)";
+    el.style.transform = "translateY(0) scale(1)";
+    const done = () => {
+      el.style.transition = "";
+      el.style.transform = "";
+      el.classList.remove("is-swapping");
+      el.removeEventListener("transitionend", onEnd);
+    };
+    const onEnd = (event) => {
+      if (event.target === el && event.propertyName === "transform") done();
+    };
+    el.addEventListener("transitionend", onEnd);
+    window.setTimeout(done, 520);
+  });
+}
+
+function moveCageStep(id, dir) {
+  if (cageSwapLock) return;
+  const i = state.pipe.steps.findIndex((step) => step.id === id);
+  if (i < 0) return;
+  const j = dir === "up" ? i - 1 : i + 1;
+  if (j < 0 || j >= state.pipe.steps.length) return;
+  const first = motionOk() ? cageCardRects() : null;
+  const steps = state.pipe.steps;
+  [steps[i], steps[j]] = [steps[j], steps[i]];
+  persist();
+  haptic("medium");
+  cageSwapLock = true;
+  try {
+    renderPipe(true);
+  } catch (err) {
+    cageSwapLock = false;
+    throw err;
+  }
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      try {
+        playCageSwap(first, id);
+      } finally {
+        window.setTimeout(() => {
+          cageSwapLock = false;
+        }, motionOk() ? 500 : 0);
+      }
+    });
   });
 }
 
 pipeStepsEl.addEventListener("click", async (event) => {
-  if (cageDrag?.moved) return;
+  const move = event.target.closest("[data-move]");
+  if (move) {
+    const card = move.closest(".cage-card");
+    if (card?.dataset.id) moveCageStep(card.dataset.id, move.dataset.move);
+    return;
+  }
   const drop = event.target.closest("[data-drop]");
   if (!drop) return;
   const id = drop.dataset.drop;
@@ -1638,73 +2287,6 @@ pipeStepsEl.addEventListener("click", async (event) => {
   persist();
   renderPipe(true);
 });
-
-function cageCardAtY(clientY) {
-  const cards = [...pipeStepsEl.querySelectorAll(".cage-card")];
-  for (let i = 0; i < cards.length; i += 1) {
-    const box = cards[i].getBoundingClientRect();
-    if (clientY < box.top + box.height / 2) return i;
-  }
-  return Math.max(0, cards.length - 1);
-}
-
-function placeCageCard(card, to) {
-  const cards = [...pipeStepsEl.querySelectorAll(".cage-card")];
-  const from = cards.indexOf(card);
-  if (from < 0 || from === to) return;
-  const target = cards[to];
-  if (from < to) target.after(card);
-  else target.before(card);
-}
-
-function commitCageOrder() {
-  const ids = [...pipeStepsEl.querySelectorAll(".cage-card")].map((el) => el.dataset.id);
-  state.pipe.steps = ids.map((id) => state.pipe.steps.find((step) => step.id === id)).filter(Boolean);
-  persist();
-  renderPipe(true);
-}
-
-pipeStepsEl.addEventListener("pointerdown", (event) => {
-  if (!cageSorting()) return;
-  if (event.target.closest("input, [data-drop], .unit-field")) return;
-  const card = event.target.closest(".cage-card");
-  if (!card || state.pipe.steps.length < 2) return;
-  event.preventDefault();
-  cageDrag = {
-    id: card.dataset.id,
-    y: event.clientY,
-    moved: false,
-    card,
-  };
-});
-
-window.addEventListener("pointermove", (event) => {
-  if (!cageDrag) return;
-  if (Math.abs(event.clientY - cageDrag.y) < 6 && !cageDrag.moved) return;
-  if (!cageDrag.moved) {
-    cageDrag.moved = true;
-    cageDrag.card.classList.add("is-dragging");
-    try {
-      cageDrag.card.setPointerCapture(event.pointerId);
-    } catch {
-      /* ignore */
-    }
-  }
-  placeCageCard(cageDrag.card, cageCardAtY(event.clientY));
-});
-
-function endCageDrag() {
-  if (!cageDrag) return;
-  const moved = cageDrag.moved;
-  cageDrag.card.classList.remove("is-dragging");
-  if (moved) commitCageOrder();
-  window.setTimeout(() => {
-    cageDrag = null;
-  }, 0);
-}
-
-window.addEventListener("pointerup", endCageDrag);
-window.addEventListener("pointercancel", endCageDrag);
 
 pipeClr.addEventListener("input", () => {
   state.pipe.clrRaw = pipeClr.value;
@@ -1777,7 +2359,6 @@ let pipeTwo = null;
 let pipeTap = null;
 let pipeBlockRotate = false;
 let pipeZoomSave = 0;
-let pipeLive = false;
 
 function setPipeLive(on) {
   const next = Boolean(on);
@@ -1785,8 +2366,11 @@ function setPipeLive(on) {
   pipeLive = next;
   pipeWorkspace?.classList.toggle("is-live", pipeLive);
   if (pipeEngage) pipeEngage.hidden = pipeLive;
-  if (pipeDone) pipeDone.hidden = !pipeLive;
   if (!pipeLive) {
+    pickDist = false;
+    pickIds = [];
+    distPickBtn?.setAttribute("aria-pressed", "false");
+    pipeWorkspace?.classList.remove("is-picking");
     pipeRotate = null;
     pipeTwo = null;
     pipeTap = null;
@@ -1794,6 +2378,7 @@ function setPipeLive(on) {
     pipeBlockRotate = false;
     pipeWorkspace?.classList.remove("is-drag");
   }
+  syncPipeChrome();
   if (changed && state.tab === "pipe") renderPipePreview(parsedPipeSteps());
 }
 
@@ -2064,11 +2649,17 @@ window.addEventListener("resize", () => {
   else if (state.tab === "triangle") refresh();
 });
 
+function setInstallLabel(text) {
+  if (!installBtn) return;
+  installBtn.setAttribute("aria-label", text);
+  installBtn.title = text;
+}
+
 let deferredPrompt = null;
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   deferredPrompt = event;
-  installBtn.textContent = "Install";
+  setInstallLabel("Install");
 });
 
 installBtn.addEventListener("click", async () => {
@@ -2082,7 +2673,7 @@ installBtn.addEventListener("click", async () => {
 
 async function setupPwa() {
   if (!("serviceWorker" in navigator)) {
-    installBtn.textContent = "Browser only";
+    setInstallLabel("Browser only");
     return;
   }
   const loopback =
@@ -2095,18 +2686,18 @@ async function setupPwa() {
       const keys = await caches.keys();
       await Promise.all(keys.map((key) => caches.delete(key)));
     }
-    installBtn.textContent = "Install";
+    setInstallLabel("Install");
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js?v=68");
+    const reg = await navigator.serviceWorker.register("./sw.js?v=83");
     const ready = await navigator.serviceWorker.ready;
-    if (ready.active || reg.active) installBtn.textContent = "Ready";
+    if (ready.active || reg.active) setInstallLabel("Ready");
     navigator.serviceWorker.addEventListener("message", (event) => {
-      if (event.data === "ready") installBtn.textContent = "Offline ready";
+      if (event.data === "ready") setInstallLabel("Offline ready");
     });
   } catch {
-    installBtn.textContent = "Install";
+    setInstallLabel("Install");
   }
 }
 

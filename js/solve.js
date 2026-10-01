@@ -368,10 +368,11 @@ export function placeAttachedChips(pts, box, bounds, gap = 14) {
   const order = ["C", "c", "A", "B", "a", "b"];
   const placed = {};
   const inset = 8;
+  const top = bounds.top ?? inset;
 
   const clamp = (cx, cy) => ({
     cx: Math.min(bounds.w - box.w / 2 - inset, Math.max(box.w / 2 + inset, cx)),
-    cy: Math.min(bounds.h - box.h / 2 - inset, Math.max(box.h / 2 + inset, cy)),
+    cy: Math.min(bounds.h - box.h / 2 - inset, Math.max(box.h / 2 + top, cy)),
   });
 
   const asRect = (p) => ({

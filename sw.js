@@ -1,4 +1,4 @@
-const CACHE = "fab-bench-v44";
+const CACHE = "fab-bench-v59";
 const ASSETS = [
   "./",
   "./index.html",
@@ -7,6 +7,7 @@ const ASSETS = [
   "./js/parse.js",
   "./js/solve.js",
   "./js/pipe.js",
+  "./js/fit.js",
   "./js/storage.js",
   "./manifest.webmanifest",
   "./icons/icon.svg",

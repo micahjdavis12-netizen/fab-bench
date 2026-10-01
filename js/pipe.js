@@ -452,5 +452,6 @@ export function layoutPipePath(model, width, height, yaw, pitch, pad = 36, od = 
     scale: scaleN,
     width,
     height,
+    mapWorld: (p) => map(projectPoint(p, yaw, pitch)),
   };
 }

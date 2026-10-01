@@ -33,7 +33,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon-192.png" type="image/png" />
     <link rel="apple-touch-icon" href="./icons/icon-180.png" sizes="180x180" />
-    <link rel="stylesheet" href="./css/app.css?v=68" />
+      <link rel="stylesheet" href="./css/app.css?v=83" />
     <style>
       .saved {
         display: grid !important;
@@ -55,7 +55,7 @@
     </style>
     <script>
       (function () {
-        var build = "68";
+        var build = "83";
         var local = location.hostname === "127.0.0.1" || location.hostname === "localhost";
         var seen = localStorage.getItem("fab-bench-build") === build;
         if (seen && !local) return;
@@ -106,13 +106,16 @@
               />
             </svg>
           </button>
-          <button class="glass compact" type="button" id="install" aria-label="Install status">
-            Install
+          <button class="icon-btn glass" type="button" id="install" aria-label="Install" title="Install">
+            <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 2.5v8M5.2 8.2 8 11l2.8-2.8M3.2 13.2h9.6" />
+            </svg>
           </button>
         </div>
       </header>
 
       <div class="tabs" role="tablist" aria-label="Fab Bench tools">
+        <span class="seg-pill" aria-hidden="true"></span>
         <button class="tab" type="button" role="tab" id="tab-combine" data-tab="combine" aria-selected="false" aria-controls="view-combine">Calculator</button>
         <button class="tab" type="button" role="tab" id="tab-triangle" data-tab="triangle" aria-selected="true" aria-controls="view-triangle">Triangle</button>
         <button class="tab" type="button" role="tab" id="tab-pipe" data-tab="pipe" aria-selected="false" aria-controls="view-pipe">Pipe</button>
@@ -138,13 +141,22 @@
         </section>
 
         <div class="dock">
-          <button class="glass float" type="button" id="clear">Clear triangle</button>
+          <button class="glass float" type="button" id="clear" aria-label="Clear triangle">
+            <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M3.2 5.2h9.6M6 5.2V3.8h4v1.4M4.4 5.2l.6 8h6l.6-8" />
+            </svg>
+            Clear
+          </button>
         </div>
 
         <section class="panel" aria-labelledby="bank-title">
           <div class="panel-head">
             <h2 id="bank-title">Saved</h2>
-            <button class="text-btn" type="button" id="clear-bank">Clear</button>
+            <button class="icon-btn" type="button" id="clear-bank" aria-label="Clear saved" title="Clear saved">
+              <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3.2 5.2h9.6M6 5.2V3.8h4v1.4M4.4 5.2l.6 8h6l.6-8" />
+              </svg>
+            </button>
           </div>
           <p class="empty" id="bank-empty">Tap + on a solved side or angle to save it.</p>
           <ul class="bank" id="bank"></ul>
@@ -166,7 +178,13 @@
             <p class="calc-expr" id="calc-expr"></p>
             <div class="calc-readout">
               <input id="calc-entry" autocomplete="off" inputmode="text" aria-label="Calculator value" value="0" />
-              <span class="unit" id="calc-unit">in</span>
+              <span class="unit unit-reel" id="calc-unit">
+                <span class="unit-reel-view">
+                  <span class="unit-reel-track">
+                    <span class="unit-reel-item">in</span>
+                  </span>
+                </span>
+              </span>
             </div>
             <p class="conv" id="calc-conv"></p>
           </div>
@@ -199,7 +217,11 @@
         <section class="panel" aria-labelledby="recent-title">
           <div class="panel-head">
             <h2 id="recent-title">Recent</h2>
-            <button class="text-btn" type="button" id="clear-calc">Clear</button>
+            <button class="icon-btn" type="button" id="clear-calc" aria-label="Clear recent" title="Clear recent">
+              <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M3.2 5.2h9.6M6 5.2V3.8h4v1.4M4.4 5.2l.6 8h6l.6-8" />
+              </svg>
+            </button>
           </div>
           <p class="empty" id="calc-empty">Equals saves the last calculation here.</p>
           <ol class="calc-list" id="calc-list"></ol>
@@ -208,13 +230,6 @@
 
       <div class="view" id="view-pipe" role="tabpanel" aria-labelledby="tab-pipe" hidden>
         <div class="pipe-stage">
-          <div class="pipe-chrome">
-            <div class="pipe-tools">
-              <button class="glass compact pipe-frame-btn" type="button" id="pipe-recenter" hidden>Re-center</button>
-              <button class="glass compact pipe-dist-btn" type="button" id="dist-pick-btn" aria-pressed="false">Distance between</button>
-              <button class="glass compact pipe-done" type="button" id="pipe-done" hidden>Done</button>
-            </div>
-          </div>
           <section class="workspace pipe-space" id="pipe-workspace" aria-label="Pipe cage">
             <svg id="pipe" viewBox="0 0 400 420" role="img" aria-label="Bent pipe centerline"></svg>
             <p class="diagram-msg" id="pipe-msg"></p>
@@ -242,6 +257,28 @@
                 />
               </svg>
             </button>
+            <div class="pipe-chrome" hidden>
+              <div class="pipe-tools">
+                <button class="glass icon-btn pipe-frame-btn" type="button" id="pipe-recenter" hidden aria-label="Re-center" title="Re-center">
+                  <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+                    <circle cx="8" cy="8" r="3.1" />
+                    <path d="M8 1.8v2.3M8 11.9v2.3M1.8 8h2.3M11.9 8h2.3" />
+                  </svg>
+                </button>
+                <button class="glass icon-btn pipe-dist-btn" type="button" id="dist-pick-btn" hidden aria-pressed="false" aria-label="Distance between" title="Distance between">
+                  <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+                    <circle cx="3.4" cy="8" r="1.4" />
+                    <circle cx="12.6" cy="8" r="1.4" />
+                    <path d="M5.2 8h5.6" />
+                  </svg>
+                </button>
+                <button class="glass icon-btn pipe-done" type="button" id="pipe-done" hidden aria-label="Done" title="Done">
+                  <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M3.4 8.2 6.6 11.2 12.6 4.8" />
+                  </svg>
+                </button>
+              </div>
+            </div>
           </section>
         </div>
         <p class="status-bar" id="pipe-status" role="status">Drag the cage to turn it. Add straights and bends below.</p>
@@ -272,19 +309,30 @@
 
         <section class="panel" aria-labelledby="pipe-steps-title">
           <div class="panel-head">
-            <h2 id="pipe-steps-title">Cage</h2>
+            <h2 id="pipe-steps-title">Tube Geometry</h2>
             <div class="panel-head-actions">
-              <button class="icon-btn cage-sort" type="button" id="cage-sort" aria-pressed="false" aria-label="Reorder pieces">
-                <span class="sort-lines" aria-hidden="true"></span>
+              <button class="icon-btn" type="button" id="clear-pipe" aria-label="Reset cage" title="Reset cage">
+                <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M3.2 7.2A4.8 4.8 0 1 0 4.6 4.2" />
+                  <path d="M3 3.4v3.2h3.2" />
+                </svg>
               </button>
-              <button class="text-btn" type="button" id="clear-pipe">Reset</button>
             </div>
           </div>
           <ol class="cage-list" id="pipe-steps"></ol>
           <div class="dock cage-dock">
-            <button class="glass float" type="button" id="add-straight">Add straight</button>
-            <button class="glass float" type="button" id="add-bend">Add bend</button>
-            <button class="glass float" type="button" id="add-joint">Add joint</button>
+            <button class="glass float" type="button" id="add-straight" aria-label="Add straight">
+              <svg class="mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.4 8h11.2" /></svg>
+              Straight
+            </button>
+            <button class="glass float" type="button" id="add-bend" aria-label="Add bend">
+              <svg class="mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 12c0-5 4-8 10-8" /></svg>
+              Bend
+            </button>
+            <button class="glass float" type="button" id="add-joint" aria-label="Add joint">
+              <svg class="mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 11.4 8 4.6 13.4 11.4" /></svg>
+              Joint
+            </button>
           </div>
         </section>
 
@@ -292,7 +340,7 @@
       </div>
 
       <div class="view" id="view-distance" role="tabpanel" aria-labelledby="tab-distance" hidden>
-        <p class="status-bar">Points are named along the cage. Straight-line is through space. Along pipe follows the run. Each is labeled center to center, inside to inside, or outside to outside.</p>
+        <p class="status-bar">Pick two named points. Straight-line is through space. Along pipe follows the run. Toggle center, inside, or outside of the pipe.</p>
 
         <section class="panel" aria-labelledby="dist-title">
           <div class="panel-head">
@@ -305,6 +353,11 @@
             <label>To
               <select id="dist-to" aria-label="To point"></select>
             </label>
+          </div>
+          <div class="kind-toggle dist-face" role="group" aria-label="Pipe faces">
+            <button class="kind" type="button" data-face="center" aria-pressed="true">Center</button>
+            <button class="kind" type="button" data-face="inside" aria-pressed="false">Inside</button>
+            <button class="kind" type="button" data-face="outside" aria-pressed="false">Outside</button>
           </div>
           <div class="result" id="dist-result" aria-live="polite"></div>
         </section>
@@ -344,6 +397,6 @@
       </div>
     </dialog>
 
-    <script type="module" src="./js/app.js?v=68"></script>
+    <script type="module" src="./js/app.js?v=83"></script>
   </body>
 </html>
