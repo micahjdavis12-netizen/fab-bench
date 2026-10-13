@@ -1,12 +1,15 @@
 import {
   angleConversions,
   formatDecimal,
+  formatFeetInches,
+  formatInchesDecimal,
   formatInchesFraction,
+  fractionWasRounded,
   lengthConversions,
   parseAngle,
   parseDegrees,
   parseLength,
-} from "./parse.js?v=84";
+} from "./parse.js?v=85";
 import {
   controlAnchors,
   evaluateCalculation,
@@ -15,10 +18,11 @@ import {
   placeAttachedChips,
   solveTriangle,
   unit as vecUnit,
-} from "./solve.js?v=84";
-import { pairDistance, solveFitValue, wrapShopAngle } from "./fit.js?v=84";
-import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=84";
-import { loadState, saveState } from "./storage.js?v=84";
+} from "./solve.js?v=85";
+import { pairDistance, solveFitValue, wrapShopAngle } from "./fit.js?v=85";
+import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=85";
+import { loadState, saveState } from "./storage.js?v=85";
+import { TAP_MS, TAP_SLOP, classifyLenTap } from "./tap.js?v=85";
 
 const KEYS = ["a", "b", "c", "A", "B", "C"];
 const SIDE_KEYS = ["a", "b", "c"];
@@ -33,6 +37,10 @@ const LABELS = {
 const OP_MARK = { "+": "+", "-": "−", "*": "×", "/": "÷" };
 
 function formatCalc(kind, value, precision) {
+  return kind === "length" ? shopPlain(value, { quote: true, precision }) : angleConversions(value).degrees;
+}
+
+function legacyCalc(kind, value, precision) {
   return kind === "length"
     ? lengthConversions(value, precision).fractionalInches
     : angleConversions(value).degrees;
@@ -56,13 +64,13 @@ function migrateCalc(items, precision) {
   if (result.empty || result.error || !Number.isFinite(result.value)) return [];
   const kind = tape[0].kind === "angle" ? "angle" : "length";
   const expr = tape
-    .map((item, i) => `${i === 0 ? "" : ` ${OP_MARK[item.op] || "+"} `}${formatCalc(kind, item.value, precision)}`)
+    .map((item, i) => `${i === 0 ? "" : ` ${OP_MARK[item.op] || "+"} `}${legacyCalc(kind, item.value, precision)}`)
     .join("");
   return [
     {
       id: crypto.randomUUID(),
       kind,
-      expr: `${expr} = ${formatCalc(kind, result.value, precision)}`,
+      expr: `${expr} = ${legacyCalc(kind, result.value, precision)}`,
       value: result.value,
     },
   ];
@@ -138,8 +146,11 @@ const state = {
   distTo: stored.distTo || "",
   distFace: stored.distFace === "inside" || stored.distFace === "outside" ? stored.distFace : "center",
   theme: stored.theme === "dark" ? "dark" : "light",
+  lengthStyle: stored.lengthStyle === "decimal" ? "decimal" : "fraction",
   pipe: { ...defaultPipe(), ...stored.pipe },
 };
+
+document.documentElement.dataset.lengthStyle = state.lengthStyle;
 
 const desk = {
   kind: "length",
@@ -167,6 +178,7 @@ function persist() {
       distTo: state.distTo,
       distFace: state.distFace,
       theme: state.theme,
+      lengthStyle: state.lengthStyle,
       pipe: state.pipe,
     },
     defaultPipe
@@ -440,8 +452,85 @@ function parseKey(key, raw) {
 function displayFor(key, value, solved) {
   if (state.source[key] === "user") return state.raw[key];
   if (!solved || value == null) return "";
-  if (SIDE_KEYS.includes(key)) return `${formatInchesFraction(value, state.precision)}"`;
+  if (SIDE_KEYS.includes(key)) return shopPlain(value, { quote: true });
   return `${formatDecimal(value, 1)}°`;
+}
+
+function shopStyle() {
+  return state.lengthStyle === "decimal" ? "decimal" : "fraction";
+}
+
+function shopPlain(inches, { quote = false, precision = state.precision } = {}) {
+  const body =
+    shopStyle() === "decimal" ? formatInchesDecimal(inches) : formatInchesFraction(inches, precision);
+  return quote ? `${body}"` : body;
+}
+
+const SHOP_TAP_HINT = "Double-tap to switch fractions and decimals.";
+
+function shopHint(rounded) {
+  if (!rounded) return SHOP_TAP_HINT;
+  return `Rounded to the nearest 1/${state.precision} in. ${SHOP_TAP_HINT}`;
+}
+
+function measSpan(inches, text, { rounded = false } = {}) {
+  if (!Number.isFinite(inches)) return escapeHtml(String(text ?? ""));
+  const mark = rounded ? `<sup class="meas-round" aria-hidden="true">≈</sup>` : "";
+  const aria = rounded
+    ? `${text}, rounded to the nearest 1/${state.precision} inch. ${SHOP_TAP_HINT}`
+    : `${text}. ${SHOP_TAP_HINT}`;
+  return `<span class="meas${rounded ? " is-rounded" : ""}" data-shop-len="1" role="button" tabindex="0" title="${escapeHtml(shopHint(rounded))}" aria-label="${escapeHtml(aria)}">${escapeHtml(text)}${mark}</span>`;
+}
+
+function fractionSpan(inches) {
+  const text = lengthConversions(inches, state.precision).fractionalInches;
+  return measSpan(inches, text, { rounded: fractionWasRounded(inches, state.precision) });
+}
+
+function decimalSpan(inches) {
+  return measSpan(inches, lengthConversions(inches, state.precision).decimalInches);
+}
+
+function feetSpan(inches) {
+  return measSpan(inches, formatFeetInches(inches, state.precision, shopStyle()));
+}
+
+function primarySpan(inches, { quote = true } = {}) {
+  if (!Number.isFinite(inches)) return "";
+  if (shopStyle() === "decimal") {
+    const text = quote ? `${formatInchesDecimal(inches)}"` : formatInchesDecimal(inches);
+    return measSpan(inches, text);
+  }
+  if (quote) return fractionSpan(inches);
+  return measSpan(inches, formatInchesFraction(inches, state.precision), {
+    rounded: fractionWasRounded(inches, state.precision),
+  });
+}
+
+function metricSpan(inches) {
+  return `<span class="meas-metric">${escapeHtml(lengthConversions(inches, state.precision).mm)}</span>`;
+}
+
+function lengthConvHtml(inches) {
+  if (!Number.isFinite(inches)) return "";
+  const leading = shopStyle() === "decimal" ? decimalSpan(inches) : fractionSpan(inches);
+  const trailing = shopStyle() === "decimal" ? fractionSpan(inches) : decimalSpan(inches);
+  const sep = `<span class="meas-sep"> · </span>`;
+  return `${leading}${sep}${feetSpan(inches)}${sep}${trailing}${sep}${metricSpan(inches)}`;
+}
+
+function noteHtml(found) {
+  if (!found?.fitNote) return "";
+  if (Number.isFinite(found.fitInches)) {
+    return `${escapeHtml(found.fitNote)} ${primarySpan(found.fitInches, { quote: true })}`;
+  }
+  return escapeHtml(found.fitNote);
+}
+
+function lengthFieldConv(found) {
+  if (found?.fitNote) return noteHtml(found);
+  if (found?.length) return lengthConvHtml(found.length);
+  return "";
 }
 
 function firstParseError() {
@@ -601,12 +690,22 @@ function renderControls(ready) {
     el.classList.toggle("is-calc", state.source[key] === "calc");
     input.readOnly = state.source[key] === "calc";
     if (document.activeElement !== input) input.value = state.raw[key];
+    const shopDisplay = state.source[key] === "calc" && SIDE_KEYS.includes(key) && state.parsed[key] != null;
+    const rounded = shopDisplay && shopStyle() !== "decimal" && fractionWasRounded(state.parsed[key], state.precision);
+    el.classList.toggle("is-rounded", rounded);
+    el.classList.toggle("is-shop", shopDisplay);
+    if (shopDisplay) {
+      input.dataset.shopDisplay = "1";
+      input.title = shopHint(rounded);
+    } else {
+      delete input.dataset.shopDisplay;
+      input.title = SIDE_KEYS.includes(key) ? "Side length. Try 12 3/8 or 250 mm." : "Angle in degrees.";
+    }
     const convEl = el.querySelector(".conv");
     if (state.parsed[key] != null && !state.parseError[key]) {
       convEl.hidden = false;
-      convEl.textContent = SIDE_KEYS.includes(key)
-        ? lengthConvLine(state.parsed[key])
-        : angleConvLine(state.parsed[key]);
+      if (SIDE_KEYS.includes(key)) convEl.innerHTML = lengthConvHtml(state.parsed[key]);
+      else convEl.textContent = angleConvLine(state.parsed[key]);
     } else {
       convEl.hidden = true;
       convEl.textContent = "";
@@ -661,10 +760,10 @@ function openSave(key) {
   const kind = SIDE_KEYS.includes(key) ? "length" : "angle";
   const value = solved[key];
   state.saveTarget = { key, kind, value };
-  saveMeta.textContent =
+  saveMeta.innerHTML =
     kind === "length"
-      ? `${LABELS[key]} · ${lengthConversions(value, state.precision).fractionalInches}`
-      : `${LABELS[key]} · ${angleConversions(value).degrees}`;
+      ? `${escapeHtml(LABELS[key])} · ${primarySpan(value, { quote: true })}`
+      : `${escapeHtml(LABELS[key])} · ${escapeHtml(angleConversions(value).degrees)}`;
   saveName.value = LABELS[key];
   dialog.showModal();
   saveName.focus();
@@ -697,7 +796,10 @@ document.getElementById("save-form").addEventListener("submit", (event) => {
 function lengthConvLine(inches) {
   if (!Number.isFinite(inches)) return "";
   const conv = lengthConversions(inches, state.precision);
-  return `${conv.fractionalInches} · ${conv.feetInches} · ${conv.decimalInches} · ${conv.mm}`;
+  const feet = formatFeetInches(inches, state.precision, shopStyle());
+  const frac = fractionWasRounded(inches, state.precision) ? `${conv.fractionalInches} ≈` : conv.fractionalInches;
+  if (shopStyle() === "decimal") return `${conv.decimalInches} · ${feet} · ${frac} · ${conv.mm}`;
+  return `${frac} · ${feet} · ${conv.decimalInches} · ${conv.mm}`;
 }
 
 function angleConvLine(degrees) {
@@ -719,8 +821,8 @@ function renderBank() {
       return `<li class="saved" style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:12px">
         <div class="saved-info" style="min-width:0">
           <h3>${escapeHtml(item.name)}</h3>
-          <strong>${item.kind === "length" ? conv.fractionalInches : conv.degrees}</strong>
-          <p class="meta">${item.kind === "length" ? lengthConvLine(item.value) : angleConvLine(item.value)}</p>
+          <strong>${item.kind === "length" ? primarySpan(item.value, { quote: true }) : escapeHtml(conv.degrees)}</strong>
+          <p class="meta">${item.kind === "length" ? lengthConvHtml(item.value) : escapeHtml(angleConvLine(item.value))}</p>
         </div>
         <div class="saved-actions" style="display:flex;align-items:center;gap:8px">
           <button class="icon-btn" type="button" data-del="${item.id}" aria-label="Delete ${escapeHtml(item.name)}">×</button>
@@ -792,10 +894,10 @@ function pushRecent(expr, value) {
   persist();
 }
 
-function deskConvText() {
+function deskConvHtml() {
   const parsed = parseDesk();
-  if (parsed.empty || parsed.error || !Number.isFinite(parsed.value)) return parsed.error || "";
-  return desk.kind === "length" ? lengthConvLine(parsed.value) : angleConvLine(parsed.value);
+  if (parsed.empty || parsed.error || !Number.isFinite(parsed.value)) return escapeHtml(parsed.error || "");
+  return desk.kind === "length" ? lengthConvHtml(parsed.value) : escapeHtml(angleConvLine(parsed.value));
 }
 
 function renderDesk() {
@@ -810,7 +912,17 @@ function renderDesk() {
   } else if (calcEntry && desk.fresh && document.activeElement !== calcEntry) {
     calcEntry.value = desk.entry || "0";
   }
-  if (calcConv) calcConv.textContent = deskConvText();
+  if (calcConv) calcConv.innerHTML = deskConvHtml();
+  if (calcEntry) {
+    const show = desk.fresh && desk.kind === "length" && Number.isFinite(desk.acc) && Boolean(desk.entry);
+    if (show) {
+      calcEntry.dataset.shopDisplay = "1";
+      calcEntry.title = SHOP_TAP_HINT;
+    } else {
+      delete calcEntry.dataset.shopDisplay;
+      calcEntry.removeAttribute("title");
+    }
+  }
   document.querySelectorAll("[data-kind]").forEach((el) => {
     el.setAttribute("aria-pressed", String(el.dataset.kind === desk.kind));
   });
@@ -827,8 +939,8 @@ function renderCalc() {
       return `<li class="tape-row" data-id="${item.id}">
         <div class="tape-copy">
           <span class="tape-expr">${escapeHtml(item.expr)}</span>
-          <span class="tape-val">${shown}</span>
-          <span class="conv">${shownAlt(item)}</span>
+          <span class="tape-val">${item.kind === "length" ? primarySpan(item.value, { quote: true }) : escapeHtml(shown)}</span>
+          <span class="conv">${item.kind === "length" ? lengthConvHtml(item.value) : escapeHtml(shownAlt(item))}</span>
         </div>
         <button class="icon-btn" type="button" data-remove="${item.id}" aria-label="Remove calculation">×</button>
       </li>`;
@@ -1111,7 +1223,9 @@ calcPad.addEventListener("click", (event) => {
 calcEntry.addEventListener("input", () => {
   desk.entry = calcEntry.value;
   desk.fresh = false;
-  if (calcConv) calcConv.textContent = deskConvText();
+  delete calcEntry.dataset.shopDisplay;
+  calcEntry.removeAttribute("title");
+  if (calcConv) calcConv.innerHTML = deskConvHtml();
 });
 
 calcEntry.addEventListener("keydown", (event) => {
@@ -1283,7 +1397,8 @@ function applyFits(parsed) {
     if (result.dead) {
       found.fitNote = "This piece doesn’t change that distance.";
     } else if (!result.hit) {
-      found.fitNote = `Can’t reach ${lengthConversions(target.inches, state.precision).fractionalInches}`;
+      found.fitNote = "Can’t reach";
+      found.fitInches = target.inches;
     } else {
       found.fitNote = "";
     }
@@ -1337,30 +1452,33 @@ function pipeWorkspaceToSvg(x, y) {
 }
 
 function updatePipeStepConvs(parsed) {
-  if (pipeClrConv) {
-    pipeClrConv.textContent = parsed.clr > 0 ? lengthConvLine(parsed.clr) : "";
-  }
-  if (pipeOdConv) {
-    pipeOdConv.textContent = parsed.od > 0 ? lengthConvLine(parsed.od) : "";
-  }
+  if (pipeClrConv) pipeClrConv.innerHTML = parsed.clr > 0 ? lengthConvHtml(parsed.clr) : "";
+  if (pipeOdConv) pipeOdConv.innerHTML = parsed.od > 0 ? lengthConvHtml(parsed.od) : "";
   pipeStepsEl.querySelectorAll("[data-straight], [data-len]").forEach((input) => {
     const id = input.dataset.straight || input.dataset.len;
     const live = state.pipe.steps.find((s) => s.id === id);
     const step = parsed.steps.find((s) => s.id === id);
     const conv = input.closest("label")?.querySelector(".conv");
-    if (conv) {
-      conv.textContent = step?.fitNote || (step?.length ? lengthConvLine(step.length) : "");
+    const solved = live?.fit?.field === "length" && step?.length > 0;
+    if (solved && document.activeElement !== input) input.value = shopPlain(step.length);
+    if (solved) {
+      input.dataset.shopDisplay = "1";
+      input.title = shopHint(shopStyle() !== "decimal" && fractionWasRounded(step.length, state.precision));
+    } else {
+      delete input.dataset.shopDisplay;
+      input.removeAttribute("title");
     }
-    if (live?.fit?.field === "length" && step?.length > 0 && document.activeElement !== input) {
-      input.value = formatInchesFraction(step.length, state.precision);
-    }
+    if (conv) conv.innerHTML = lengthFieldConv(step);
   });
   pipeStepsEl.querySelectorAll("[data-angle]").forEach((input) => {
     const live = state.pipe.steps.find((s) => s.id === input.dataset.angle);
     const step = parsed.steps.find((s) => s.id === input.dataset.angle);
     const label = input.closest("label");
     const conv = label?.querySelector(".conv");
-    if (conv) conv.textContent = step?.fitNote || (step?.angle ? angleConvLine(step.angle) : "");
+    if (conv) {
+      if (step?.fitNote) conv.innerHTML = noteHtml(step);
+      else conv.textContent = step?.angle ? angleConvLine(step.angle) : "";
+    }
     const miter = label?.querySelector(".miter");
     if (miter) miter.textContent = step?.type === "joint" && step.angle ? miterLine(step) : "";
     if (live?.fit?.field === "angle" && Number.isFinite(step?.angle) && document.activeElement !== input) {
@@ -1476,12 +1594,14 @@ function renderPipeList(parsed) {
             <label>
               <span class="field-lab">Length ${ifButton(step, "length")}</span>
               <div class="unit-field">
-                <input data-straight="${step.id}" value="${escapeHtml(step.raw)}" placeholder="12" inputmode="text" ${
-                  step.fit?.field === "length" ? "readonly" : ""
+                <input data-straight="${step.id}" value="${escapeHtml(
+                  step.fit?.field === "length" && found?.length > 0 ? shopPlain(found.length) : step.raw
+                )}" placeholder="12" inputmode="text" ${
+                  step.fit?.field === "length" ? 'readonly data-shop-display="1"' : ""
                 } />
                 <span class="unit">in</span>
               </div>
-              <p class="conv">${found?.fitNote || (found?.length ? lengthConvLine(found.length) : "")}</p>
+              <p class="conv">${lengthFieldConv(found)}</p>
             </label>
             ${first ? sitAng : ""}
             ${ifPanel(step, stations)}
@@ -1507,12 +1627,14 @@ function renderPipeList(parsed) {
               ? `<label class="cage-span">
               <span class="field-lab">Length ${ifButton(step, "length")}</span>
               <div class="unit-field">
-                <input data-len="${step.id}" value="${escapeHtml(step.raw || "")}" placeholder="2" inputmode="text" ${
-                  step.fit?.field === "length" ? "readonly" : ""
+                <input data-len="${step.id}" value="${escapeHtml(
+                  step.fit?.field === "length" && found?.length > 0 ? shopPlain(found.length) : step.raw || ""
+                )}" placeholder="2" inputmode="text" ${
+                  step.fit?.field === "length" ? 'readonly data-shop-display="1"' : ""
                 } />
                 <span class="unit">in</span>
               </div>
-              <p class="conv">${step.fit?.field === "length" ? found?.fitNote || "" : found?.length ? lengthConvLine(found.length) : ""}</p>
+              <p class="conv">${step.fit?.field === "length" ? noteHtml(found) : found?.length ? lengthConvHtml(found.length) : ""}</p>
             </label>`
               : ""
           }
@@ -1524,7 +1646,7 @@ function renderPipeList(parsed) {
               } />
               <span class="unit">°</span>
             </div>
-            <p class="conv">${step.fit?.field === "angle" ? found?.fitNote || "" : found?.angle ? angleConvLine(found.angle) : ""}</p>
+            <p class="conv">${step.fit?.field === "angle" ? noteHtml(found) : found?.angle ? escapeHtml(angleConvLine(found.angle)) : ""}</p>
             ${isJoint ? `<p class="conv miter">${found?.angle ? miterLine(found) : ""}</p>` : ""}
           </label>
           <label>Clock
@@ -1784,21 +1906,17 @@ function renderPipePreview(parsed) {
     pipeResult.innerHTML = "";
     return;
   }
-  const conv = lengthConversions(model.developed, state.precision);
-  const inside = lengthConversions(model.developedInside, state.precision);
-  const outside = lengthConversions(model.developedOutside, state.precision);
-  const reach = lengthConversions(model.reach, state.precision);
-  const odConv = lengthConversions(od, state.precision);
+  const developed = model.developed;
   pipeResult.innerHTML = `<div class="total">
-    <p class="equation">${model.bendCount} bend${model.bendCount === 1 ? "" : "s"} · ${model.jointCount} joint${model.jointCount === 1 ? "" : "s"} · ${odConv.fractionalInches} diameter</p>
-    <div class="total-main"><span>Center to center</span><strong>${conv.fractionalInches}</strong></div>
+    <p class="equation">${model.bendCount} bend${model.bendCount === 1 ? "" : "s"} · ${model.jointCount} joint${model.jointCount === 1 ? "" : "s"} · ${primarySpan(od, { quote: true })} diameter</p>
+    <div class="total-main"><span>Center to center</span><strong>${primarySpan(developed, { quote: true })}</strong></div>
     <div class="alts">
-      <span>${conv.feetInches}</span>
-      <span>${conv.decimalInches}</span>
-      <span>${conv.mm}</span>
-      <span>Inside to inside ${inside.fractionalInches}</span>
-      <span>Outside to outside ${outside.fractionalInches}</span>
-      <span>End reach ${reach.fractionalInches}</span>
+      ${feetSpan(developed)}
+      ${shopStyle() === "decimal" ? fractionSpan(developed) : decimalSpan(developed)}
+      ${metricSpan(developed)}
+      <span>Inside to inside ${primarySpan(model.developedInside, { quote: true })}</span>
+      <span>Outside to outside ${primarySpan(model.developedOutside, { quote: true })}</span>
+      <span>End reach ${primarySpan(model.reach, { quote: true })}</span>
     </div>
   </div>`;
 }
@@ -1830,26 +1948,28 @@ function currentStations() {
 }
 
 function inchMark(value) {
-  return lengthConversions(value, state.precision).fractionalInches;
+  return primarySpan(value, { quote: true });
 }
 
 function signedInch(value) {
   if (!(Math.abs(value) > 1e-9)) return inchMark(0);
-  return `${value < 0 ? "−" : ""}${inchMark(Math.abs(value))}`;
+  const sign = value < 0 ? "−" : "";
+  return `${sign}${inchMark(Math.abs(value))}`;
 }
 
 function distMeasure(inches, alts = false) {
   if (!Number.isFinite(inches) || inches < -1e-9) {
     return { main: "—", alts: "" };
   }
-  const conv = lengthConversions(Math.max(0, inches), state.precision);
+  const value = Math.max(0, inches);
+  const other = shopStyle() === "decimal" ? fractionSpan(value) : decimalSpan(value);
   return {
-    main: conv.fractionalInches,
+    main: primarySpan(value, { quote: true }),
     alts: alts
       ? `<div class="alts">
-          <span>${conv.feetInches}</span>
-          <span>${conv.decimalInches}</span>
-          <span>${conv.mm}</span>
+          ${feetSpan(value)}
+          ${other}
+          ${metricSpan(value)}
         </div>`
       : "",
   };
@@ -1930,7 +2050,7 @@ function renderDistance() {
           : "";
       return `<div class="work-row">
         <span>${escapeHtml(leg.from)}→${escapeHtml(leg.to)}</span>
-        <span class="work-note">${escapeHtml(leg.label)}${note ? ` · ${escapeHtml(note)}` : ""}</span>
+        <span class="work-note">${escapeHtml(leg.label)}${note ? ` · ${note}` : ""}</span>
         <span>${inchMark(leg.length)}</span>
       </div>`;
     })
@@ -2100,14 +2220,19 @@ function pathMid(points) {
   return { x: points[0].x, y: points[0].y, angle: 0 };
 }
 
-function ifSpanLabel(fit) {
+function ifSpanInches(fit) {
   const target = parseLength(fit.raw);
-  if (!target.error && target.inches > 0) {
-    return lengthConversions(target.inches, state.precision).fractionalInches;
-  }
+  if (!target.error && target.inches > 0) return target.inches;
   const inches = pairDistance(currentPipeModel(), fit.from, fit.to, fit.path, fitFace());
-  if (!Number.isFinite(inches) || inches < 0) return "";
-  return lengthConversions(inches, state.precision).fractionalInches;
+  if (!Number.isFinite(inches) || inches < 0) return null;
+  return inches;
+}
+
+function ifSpanLabel(fit) {
+  const inches = ifSpanInches(fit);
+  if (inches == null) return "";
+  const rounded = shopStyle() !== "decimal" && fractionWasRounded(inches, state.precision);
+  return `${shopPlain(inches, { quote: true })}${rounded ? "≈" : ""}`;
 }
 
 function ifLabelPoint(mid, points, width, height) {
@@ -2150,7 +2275,8 @@ function ifSpanMarkup(model, laid, fit) {
   const w = Math.max(40, 12 + text.length * 6.6);
   const h = 18;
   const label = text
-    ? `<g class="if-span-mark" transform="translate(${at.x.toFixed(1)} ${at.y.toFixed(1)}) rotate(${at.angle.toFixed(1)})">
+    ? `<g class="if-span-mark meas" data-shop-len="1" role="button" tabindex="0" transform="translate(${at.x.toFixed(1)} ${at.y.toFixed(1)}) rotate(${at.angle.toFixed(1)})">
+        <title>${escapeHtml(text.endsWith("≈") ? shopHint(true) : SHOP_TAP_HINT)}</title>
         <rect class="if-span-pill" x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h}" rx="9" />
         <text class="if-span-lab" dy="0.35em">${escapeHtml(text)}</text>
       </g>`
@@ -2403,7 +2529,7 @@ function setPipeLive(on) {
 }
 
 function pipeChromeHit(target) {
-  return target?.closest?.("#dist-pick-btn, #pipe-recenter, #pipe-engage, #pipe-done");
+  return target?.closest?.("#dist-pick-btn, #pipe-recenter, #pipe-engage, #pipe-done, [data-shop-len], [data-shop-display]");
 }
 
 function pipeDragTarget(event) {
@@ -2578,6 +2704,7 @@ pipeDone?.addEventListener("click", (event) => {
 pipeWorkspace.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "touch") return;
   if (pipeChromeHit(event.target)) return;
+  if (event.target.closest?.("[data-shop-len], [data-shop-display]")) return;
   if (pickDist) {
     const id = nearestStationAt(event.clientX, event.clientY);
     if (id) {
@@ -2710,7 +2837,7 @@ async function setupPwa() {
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js?v=84");
+    const reg = await navigator.serviceWorker.register("./sw.js?v=85");
     const ready = await navigator.serviceWorker.ready;
     if (ready.active || reg.active) setInstallLabel("Ready");
     navigator.serviceWorker.addEventListener("message", (event) => {
@@ -2720,6 +2847,111 @@ async function setupPwa() {
     setInstallLabel("Install");
   }
 }
+
+function shopLenTarget(node) {
+  const el = node instanceof Element ? node : node?.parentElement;
+  if (!el?.closest) return null;
+  if (el.closest("button, select, a, textarea")) return null;
+  const input = el.closest("input");
+  if (input) return input.dataset.shopDisplay === "1" ? input : null;
+  const meas = el.closest("[data-shop-len]");
+  if (meas) return meas;
+  const chip = el.closest(".measure.is-shop");
+  if (chip) return chip;
+  return null;
+}
+
+function reformatFreshEntry() {
+  if (!(desk.fresh && desk.kind === "length" && Number.isFinite(desk.acc))) return;
+  const next = formatCalc("length", desk.acc, state.precision);
+  if (desk.entry && desk.expr.endsWith(desk.entry)) {
+    desk.expr = `${desk.expr.slice(0, -desk.entry.length)}${next}`;
+  }
+  desk.entry = next;
+  if (calcEntry) calcEntry.value = next;
+}
+
+function toggleLengthStyle() {
+  state.lengthStyle = shopStyle() === "decimal" ? "fraction" : "decimal";
+  document.documentElement.dataset.lengthStyle = state.lengthStyle;
+  reformatFreshEntry();
+  persist();
+  refresh();
+  if (state.tab === "distance") renderDistance();
+  document.documentElement.dataset.lenFlip = "1";
+  window.setTimeout(() => {
+    delete document.documentElement.dataset.lenFlip;
+  }, 280);
+  haptic("light");
+  window.getSelection()?.removeAllRanges();
+}
+
+let lenTap = null;
+let blockTouchZoom = false;
+
+document.addEventListener(
+  "pointerdown",
+  (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (!lenTap || !shopLenTarget(event.target)) return;
+    const near =
+      event.timeStamp - lenTap.t <= TAP_MS &&
+      Math.hypot(event.clientX - lenTap.x, event.clientY - lenTap.y) <= TAP_SLOP;
+    if (!near) return;
+    blockTouchZoom = true;
+    window.setTimeout(() => {
+      blockTouchZoom = false;
+    }, 700);
+    event.preventDefault();
+  },
+  true
+);
+
+document.addEventListener(
+  "pointerup",
+  (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    const target = shopLenTarget(event.target);
+    if (!target) {
+      lenTap = null;
+      return;
+    }
+    const verdict = classifyLenTap(lenTap, { x: event.clientX, y: event.clientY, t: event.timeStamp });
+    lenTap = verdict.prev;
+    if (!verdict.toggle) return;
+    toggleLengthStyle();
+  },
+  true
+);
+
+document.addEventListener(
+  "click",
+  (event) => {
+    if (event.detail !== 2 || !shopLenTarget(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+  },
+  true
+);
+
+document.addEventListener(
+  "touchend",
+  (event) => {
+    if (!blockTouchZoom) return;
+    blockTouchZoom = false;
+    if (shopLenTarget(event.target) && event.cancelable) event.preventDefault();
+  },
+  { passive: false, capture: true }
+);
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const tag = event.target?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "BUTTON") return;
+  if (!shopLenTarget(event.target)) return;
+  event.preventDefault();
+  toggleLengthStyle();
+});
 
 setupPwa();
 setTab(state.tab);

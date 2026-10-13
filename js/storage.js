@@ -10,7 +10,12 @@ const defaults = {
   tab: "triangle",
   pipe: null,
   theme: "light",
+  lengthStyle: "fraction",
 };
+
+function sanitizeLengthStyle(style) {
+  return style === "decimal" ? "decimal" : "fraction";
+}
 
 function sanitizeCalc(items) {
   if (!Array.isArray(items)) return [];
@@ -126,7 +131,19 @@ export function loadState(makePipe) {
     : { clrRaw: "3", odRaw: "1 1/2", startAngleRaw: "0", startRotRaw: "0", yaw: 0, pitch: 22, zoom: 1, panX: 0, panY: 0, steps: [] };
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "", distFace: "center", theme: resolveTheme() };
+    if (!raw) {
+      return {
+        ...defaults,
+        bank: [],
+        calc: [],
+        pipe: fallbackPipe,
+        distFrom: "",
+        distTo: "",
+        distFace: "center",
+        theme: resolveTheme(),
+        lengthStyle: "fraction",
+      };
+    }
     const data = JSON.parse(raw);
     const precision = [16, 32, 64].includes(data.precision) ? data.precision : 16;
     const bank = Array.isArray(data.bank) ? data.bank.slice(0, BANK_LIMIT) : [];
@@ -144,10 +161,21 @@ export function loadState(makePipe) {
       distTo: typeof data.distTo === "string" ? data.distTo : "",
       distFace: data.distFace === "inside" || data.distFace === "outside" ? data.distFace : "center",
       theme: resolveTheme(data.theme),
+      lengthStyle: sanitizeLengthStyle(data.lengthStyle),
       pipe: { ...pipe, yaw: fallbackPipe.yaw, pitch: fallbackPipe.pitch },
     };
   } catch {
-    return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "", distFace: "center", theme: resolveTheme() };
+    return {
+      ...defaults,
+      bank: [],
+      calc: [],
+      pipe: fallbackPipe,
+      distFrom: "",
+      distTo: "",
+      distFace: "center",
+      theme: resolveTheme(),
+      lengthStyle: "fraction",
+    };
   }
 }
 
@@ -166,6 +194,7 @@ export function saveState(partial, makePipe) {
         ? current.distFace
         : "center",
     theme: resolveTheme(partial.theme ?? current.theme),
+    lengthStyle: sanitizeLengthStyle(partial.lengthStyle ?? current.lengthStyle),
     pipeVersion: 3,
     pipe: sanitizePipe(partial.pipe ?? current.pipe, current.pipe),
   };

@@ -1,4 +1,4 @@
-const CACHE = "fab-bench-v60";
+const CACHE = "fab-bench-v61";
 const ASSETS = [
   "./",
   "./index.html",
@@ -9,6 +9,7 @@ const ASSETS = [
   "./js/pipe.js",
   "./js/fit.js",
   "./js/storage.js",
+  "./js/tap.js",
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/icon-180.png",
