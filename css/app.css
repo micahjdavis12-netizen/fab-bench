@@ -421,6 +421,78 @@ button {
   z-index: 0;
 }
 
+.meas {
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: color-mix(in srgb, currentColor 38%, transparent);
+  text-underline-offset: 0.16em;
+  text-decoration-thickness: 1px;
+}
+
+.meas-round {
+  font-size: 0.62em;
+  margin-left: 1px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.meas-metric,
+.meas-sep {
+  text-decoration: none;
+}
+
+.measure.is-shop {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.measure.is-shop input {
+  cursor: pointer;
+  touch-action: manipulation;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: color-mix(in srgb, var(--muted) 75%, transparent);
+  text-underline-offset: 3px;
+}
+
+input[data-shop-display] {
+  cursor: pointer;
+  touch-action: manipulation;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent);
+  text-underline-offset: 3px;
+}
+
+@media (hover: hover) {
+  .meas:hover,
+  .measure.is-shop input:hover,
+  input[data-shop-display]:hover {
+    text-decoration-color: var(--accent);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html[data-len-flip] .meas,
+  html[data-len-flip] .measure.is-shop input,
+  html[data-len-flip] input[data-shop-display],
+  html[data-len-flip] .if-span-mark {
+    animation: meas-flip 0.22s ease;
+  }
+}
+
+@keyframes meas-flip {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .unit-field {
   display: flex;
   align-items: center;
@@ -517,6 +589,19 @@ button {
 
 .if-span {
   pointer-events: none;
+}
+
+.if-span-mark,
+.if-span-mark * {
+  pointer-events: auto;
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
+.if-span-mark .if-span-lab {
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in srgb, var(--muted) 80%, transparent);
+  text-underline-offset: 2px;
 }
 
 .if-span-line {
