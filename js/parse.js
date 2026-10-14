@@ -196,11 +196,33 @@ export function formatInchesFraction(inches, denom = 16) {
   return `${prefix}${whole}\u00a0${n}/${d}`;
 }
 
-export function formatFeetInches(inches, denom = 16) {
+export function inchesFromFraction(inches, denom = 16) {
+  const { sign, whole, n, d } = inchesToFractionParts(inches, denom);
+  const mag = whole + (d ? n / d : 0);
+  return sign < 0 ? -mag : mag;
+}
+
+/** True when snapping to the shop denominator changes the length. */
+export function fractionWasRounded(inches, denom = 16) {
+  if (!Number.isFinite(inches)) return false;
+  return Math.abs(inchesFromFraction(inches, denom) - inches) > 1e-4;
+}
+
+export function formatInchesDecimal(inches, digits = 3) {
+  if (!Number.isFinite(inches)) return "";
+  const sign = inches < 0 ? "-" : "";
+  return `${sign}${formatDecimal(Math.abs(inches), digits)}`;
+}
+
+export function formatFeetInches(inches, denom = 16, style = "fraction") {
   const sign = inches < 0 ? "-" : "";
   const abs = Math.abs(inches);
   const feet = Math.floor(abs / 12 + 1e-12);
   const rem = abs - feet * 12;
+  if (style === "decimal") {
+    if (Number(rem.toFixed(3)) === 0) return `${sign}${feet}' 0"`;
+    return `${sign}${feet}' ${formatInchesDecimal(rem)}"`;
+  }
   const frac = formatInchesFraction(rem, denom);
   if (feet === 0) return `${sign}0' ${frac}"`;
   if (Number(rem.toFixed(6)) === 0) return `${sign}${feet}' 0"`;

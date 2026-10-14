@@ -10,7 +10,12 @@ const defaults = {
   tab: "triangle",
   pipe: null,
   theme: "light",
+  lengthStyle: "fraction",
 };
+
+function sanitizeLengthStyle(style) {
+  return style === "decimal" ? "decimal" : "fraction";
+}
 
 function sanitizeCalc(items) {
   if (!Array.isArray(items)) return [];
@@ -175,7 +180,21 @@ export function loadState(makePipe) {
     : { clrRaw: "3", odRaw: "1 1/2", startAngleRaw: "0", startRotRaw: "0", yaw: 0, pitch: 22, zoom: 1, panX: 0, panY: 0, steps: [] };
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "", distFace: "center", distGeom: [], weld: sanitizeWeld(null), theme: resolveTheme() };
+    if (!raw) {
+      return {
+        ...defaults,
+        bank: [],
+        calc: [],
+        pipe: fallbackPipe,
+        distFrom: "",
+        distTo: "",
+        distFace: "center",
+        distGeom: [],
+        weld: sanitizeWeld(null),
+        theme: resolveTheme(),
+        lengthStyle: "fraction",
+      };
+    }
     const data = JSON.parse(raw);
     const precision = [16, 32, 64].includes(data.precision) ? data.precision : 16;
     const bank = Array.isArray(data.bank) ? data.bank.slice(0, BANK_LIMIT) : [];
@@ -195,10 +214,23 @@ export function loadState(makePipe) {
       distGeom: sanitizeDistGeom(data.distGeom),
       weld: sanitizeWeld(data.weld),
       theme: resolveTheme(data.theme),
+      lengthStyle: sanitizeLengthStyle(data.lengthStyle),
       pipe: { ...pipe, yaw: fallbackPipe.yaw, pitch: fallbackPipe.pitch },
     };
   } catch {
-    return { ...defaults, bank: [], calc: [], pipe: fallbackPipe, distFrom: "", distTo: "", distFace: "center", distGeom: [], weld: sanitizeWeld(null), theme: resolveTheme() };
+    return {
+      ...defaults,
+      bank: [],
+      calc: [],
+      pipe: fallbackPipe,
+      distFrom: "",
+      distTo: "",
+      distFace: "center",
+      distGeom: [],
+      weld: sanitizeWeld(null),
+      theme: resolveTheme(),
+      lengthStyle: "fraction",
+    };
   }
 }
 
@@ -219,6 +251,7 @@ export function saveState(partial, makePipe) {
     distGeom: sanitizeDistGeom(partial.distGeom ?? current.distGeom),
     weld: sanitizeWeld(partial.weld ?? current.weld),
     theme: resolveTheme(partial.theme ?? current.theme),
+    lengthStyle: sanitizeLengthStyle(partial.lengthStyle ?? current.lengthStyle),
     pipeVersion: 3,
     pipe: sanitizePipe(partial.pipe ?? current.pipe, current.pipe),
   };

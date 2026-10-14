@@ -10,6 +10,7 @@ const ASSETS = [
   "./js/fit.js",
   "./js/weld.js",
   "./js/storage.js",
+  "./js/tap.js",
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/icon-180.png",
