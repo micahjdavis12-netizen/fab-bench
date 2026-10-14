@@ -6,7 +6,7 @@ import {
   parseAngle,
   parseDegrees,
   parseLength,
-} from "./parse.js?v=84";
+} from "./parse.js?v=88";
 import {
   controlAnchors,
   evaluateCalculation,
@@ -15,10 +15,21 @@ import {
   placeAttachedChips,
   solveTriangle,
   unit as vecUnit,
-} from "./solve.js?v=84";
-import { pairDistance, solveFitValue, wrapShopAngle } from "./fit.js?v=84";
-import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=84";
-import { loadState, saveState } from "./storage.js?v=84";
+} from "./solve.js?v=88";
+import { pairDistance, solveFitValue, wrapShopAngle } from "./fit.js?v=88";
+import { buildPipe, defaultPipe, layoutPipePath } from "./pipe.js?v=88";
+import { loadState, saveState } from "./storage.js?v=88";
+import {
+  adviseWeld,
+  chipMatches,
+  defaultWeld,
+  jointGraphic,
+  weldGaugeInches,
+  WELD_JOINTS,
+  WELD_METALS,
+  WELD_POSITIONS,
+  WELD_THICK_CHIPS,
+} from "./weld.js?v=88";
 
 const KEYS = ["a", "b", "c", "A", "B", "C"];
 const SIDE_KEYS = ["a", "b", "c"];
@@ -109,6 +120,8 @@ const confirmOk = document.getElementById("confirm-ok");
 const confirmCancel = document.getElementById("confirm-cancel");
 const distFromEl = document.getElementById("dist-from");
 const distToEl = document.getElementById("dist-to");
+const distGeomAdd = document.getElementById("dist-geom-add");
+const distGeomDrop = document.getElementById("dist-geom-drop");
 const distResult = document.getElementById("dist-result");
 const distWork = document.getElementById("dist-work");
 const distWorkPanel = document.getElementById("dist-work-panel");
@@ -116,8 +129,27 @@ const distPickBtn = document.getElementById("dist-pick-btn");
 const pipeRecenter = document.getElementById("pipe-recenter");
 const themeToggle = document.getElementById("theme-toggle");
 const themeColorMeta = document.querySelector('meta[name="theme-color"]');
+const weldMetalA = document.getElementById("weld-metal-a");
+const weldMetalB = document.getElementById("weld-metal-b");
+const weldThickA = document.getElementById("weld-thick-a");
+const weldThickB = document.getElementById("weld-thick-b");
+const weldJointsEl = document.getElementById("weld-joints");
+const weldArt = document.getElementById("weld-art");
+const weldArtTitle = document.getElementById("weld-art-title");
+const weldArtKind = document.getElementById("weld-art-kind");
+const weldResult = document.getElementById("weld-result");
+const weldPosition = document.getElementById("weld-position");
+const weldMatch = document.getElementById("weld-match");
+const weldChipsA = document.getElementById("weld-chips-a");
+const weldChipsB = document.getElementById("weld-chips-b");
+const weldFrac = document.getElementById("weld-frac");
+const weldDec = document.getElementById("weld-dec");
+const weldFracConv = document.getElementById("weld-frac-conv");
+const weldDecConv = document.getElementById("weld-dec-conv");
+const weldThickAConv = document.getElementById("weld-thick-a-conv");
+const weldThickBConv = document.getElementById("weld-thick-b-conv");
 
-const TAB_LABEL = { triangle: "Triangle", combine: "Calculator", pipe: "Pipe", distance: "Distance" };
+const TAB_LABEL = { triangle: "Triangle", combine: "Calculator", pipe: "Pipe", distance: "Distance", weld: "Weld" };
 
 const stored = loadState(defaultPipe);
 
@@ -137,6 +169,8 @@ const state = {
   distFrom: stored.distFrom || "",
   distTo: stored.distTo || "",
   distFace: stored.distFace === "inside" || stored.distFace === "outside" ? stored.distFace : "center",
+  distGeom: Array.isArray(stored.distGeom) ? stored.distGeom : [],
+  weld: { ...defaultWeld(), ...(stored.weld || {}) },
   theme: stored.theme === "dark" ? "dark" : "light",
   pipe: { ...defaultPipe(), ...stored.pipe },
 };
@@ -166,6 +200,8 @@ function persist() {
       distFrom: state.distFrom,
       distTo: state.distTo,
       distFace: state.distFace,
+      distGeom: state.distGeom,
+      weld: state.weld,
       theme: state.theme,
       pipe: state.pipe,
     },
@@ -983,6 +1019,7 @@ precisionEl.addEventListener("change", () => {
   state.precision = Number(precisionEl.value);
   persist();
   refresh();
+  if (state.tab === "weld") renderWeld();
 });
 
 ssaEl.addEventListener("click", (event) => {
@@ -992,7 +1029,7 @@ ssaEl.addEventListener("click", (event) => {
   refresh();
 });
 
-const TAB_ORDER = ["combine", "triangle", "pipe", "distance"];
+const TAB_ORDER = ["combine", "triangle", "pipe", "distance", "weld"];
 
 function setTab(tab) {
   const from = TAB_ORDER.indexOf(state.tab);
@@ -1018,6 +1055,7 @@ function setTab(tab) {
     combine: "view-combine",
     pipe: "view-pipe",
     distance: "view-distance",
+    weld: "view-weld",
   };
   Object.entries(views).forEach(([name, id]) => {
     const el = document.getElementById(id);
@@ -1052,6 +1090,7 @@ function setTab(tab) {
     }
   }
   if (tab === "distance") renderDistance();
+  if (tab === "weld") renderWeld();
 }
 
 document.querySelectorAll(".tab").forEach((btn) => {
@@ -1073,13 +1112,86 @@ if (distToEl) {
   });
 }
 
+distGeomAdd?.addEventListener("click", () => addDistGeom());
+distGeomDrop?.addEventListener("click", () => dropDistGeom());
+
 document.querySelectorAll("[data-face]").forEach((btn) => {
   btn.addEventListener("click", () => {
     state.distFace = btn.dataset.face === "inside" || btn.dataset.face === "outside" ? btn.dataset.face : "center";
     persist();
     renderDistance();
+    if (state.distGeom?.length) renderPipe(false);
   });
 });
+
+document.querySelectorAll("[data-weld-process]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const next = btn.dataset.weldProcess;
+    state.weld.process = next === "mig" || next === "stick" ? next : "tig";
+    persist();
+    haptic("light");
+    renderWeld();
+  });
+});
+
+weldMetalA?.addEventListener("change", () => {
+  state.weld.metalA = weldMetalA.value;
+  persist();
+  renderWeld();
+});
+weldMetalB?.addEventListener("change", () => {
+  state.weld.metalB = weldMetalB.value;
+  persist();
+  renderWeld();
+});
+weldThickA?.addEventListener("input", () => {
+  state.weld.thickA = weldThickA.value;
+  persist();
+  renderWeld();
+});
+weldThickB?.addEventListener("input", () => {
+  state.weld.thickB = weldThickB.value;
+  persist();
+  renderWeld();
+});
+weldJointsEl?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-weld-joint]");
+  if (!btn) return;
+  state.weld.joint = btn.dataset.weldJoint;
+  persist();
+  haptic("light");
+  renderWeld();
+});
+weldChipsA?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-weld-chip]");
+  if (!btn) return;
+  state.weld.thickA = btn.dataset.weldChip;
+  persist();
+  haptic("light");
+  renderWeld();
+});
+weldChipsB?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-weld-chip]");
+  if (!btn) return;
+  state.weld.thickB = btn.dataset.weldChip;
+  persist();
+  haptic("light");
+  renderWeld();
+});
+weldMatch?.addEventListener("click", () => {
+  state.weld.metalB = state.weld.metalA;
+  state.weld.thickB = state.weld.thickA;
+  persist();
+  haptic("light");
+  renderWeld();
+});
+weldPosition?.addEventListener("change", () => {
+  state.weld.position = weldPosition.value;
+  persist();
+  renderWeld();
+});
+weldFrac?.addEventListener("input", () => syncWeldConverter("frac"));
+weldDec?.addEventListener("input", () => syncWeldConverter("dec"));
 
 function setCalcKind(kind, keep = false) {
   const next = kind === "angle" ? "angle" : "length";
@@ -1885,6 +1997,7 @@ function renderDistance() {
   syncDistFace();
   const model = currentPipeModel();
   const stations = model.stations || [];
+  pruneDistGeom(stations);
   const ids = new Set(stations.map((s) => s.id));
   if (!ids.has(state.distFrom)) state.distFrom = stations[0]?.id || "";
   if (!ids.has(state.distTo)) state.distTo = stations[stations.length - 1]?.id || "";
@@ -1904,8 +2017,10 @@ function renderDistance() {
     }
     if (distWork) distWork.innerHTML = "";
     if (distWorkPanel) distWorkPanel.hidden = true;
+    syncDistGeomButtons("", "");
     return;
   }
+  syncDistGeomButtons(from.id, to.id);
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const dz = to.z - from.z;
@@ -1979,6 +2094,130 @@ function renderDistance() {
   if (distWorkPanel) distWorkPanel.hidden = false;
 }
 
+function weldMetalOptions() {
+  return WELD_METALS.map((metal) => `<option value="${metal.id}">${escapeHtml(metal.label)}</option>`).join("");
+}
+
+function weldPositionOptions() {
+  return WELD_POSITIONS.map((item) => `<option value="${item.id}">${escapeHtml(item.label)}</option>`).join("");
+}
+
+function readWeldInches(raw, metalId) {
+  const gauge = weldGaugeInches(raw, metalId);
+  if (gauge) return gauge;
+  const parsed = parseLength(raw);
+  if (parsed.error || !(parsed.inches > 0) || parsed.inches > 1.5) return null;
+  return parsed.inches;
+}
+
+function metalName(id) {
+  return WELD_METALS.find((metal) => metal.id === id)?.label || id;
+}
+
+function weldChipButtons(raw, metalId) {
+  return WELD_THICK_CHIPS.map((chip) => {
+    const on = chipMatches(raw, chip.id, metalId);
+    return `<button class="weld-chip" type="button" data-weld-chip="${chip.id}" aria-pressed="${String(on)}">${escapeHtml(
+      chip.label
+    )}</button>`;
+  }).join("");
+}
+
+function renderWeld() {
+  if (!weldMetalA || !state.weld) return;
+  if (!weldMetalA.options.length) {
+    weldMetalA.innerHTML = weldMetalOptions();
+    weldMetalB.innerHTML = weldMetalOptions();
+  }
+  if (weldPosition && !weldPosition.options.length) {
+    weldPosition.innerHTML = weldPositionOptions();
+  }
+  weldMetalA.value = state.weld.metalA;
+  weldMetalB.value = state.weld.metalB;
+  if (weldPosition) weldPosition.value = state.weld.position || "flat";
+  if (document.activeElement !== weldThickA) weldThickA.value = state.weld.thickA;
+  if (document.activeElement !== weldThickB) weldThickB.value = state.weld.thickB;
+  document.querySelectorAll("[data-weld-process]").forEach((btn) => {
+    btn.setAttribute("aria-pressed", String(btn.dataset.weldProcess === state.weld.process));
+  });
+  if (weldChipsA) weldChipsA.innerHTML = weldChipButtons(state.weld.thickA, state.weld.metalA);
+  if (weldChipsB) weldChipsB.innerHTML = weldChipButtons(state.weld.thickB, state.weld.metalB);
+  if (weldJointsEl) {
+    weldJointsEl.innerHTML = WELD_JOINTS.map(
+      (joint) => `<button class="weld-joint" type="button" data-weld-joint="${joint.id}" aria-pressed="${String(
+        joint.id === state.weld.joint
+      )}">
+        ${jointGraphic(joint.id, true)}
+        <strong>${escapeHtml(joint.label)}</strong>
+      </button>`
+    ).join("");
+  }
+  const inchesA = readWeldInches(state.weld.thickA, state.weld.metalA);
+  const inchesB = readWeldInches(state.weld.thickB, state.weld.metalB);
+  if (weldThickAConv) weldThickAConv.textContent = inchesA ? lengthConvLine(inchesA) : "";
+  if (weldThickBConv) weldThickBConv.textContent = inchesB ? lengthConvLine(inchesB) : "";
+  const joint = WELD_JOINTS.find((item) => item.id === state.weld.joint) || WELD_JOINTS[1];
+  if (weldArtTitle) weldArtTitle.textContent = joint.label;
+  if (weldArtKind) weldArtKind.textContent = joint.kind;
+  if (weldArt) weldArt.innerHTML = jointGraphic(state.weld.joint, false, { inchesA, inchesB });
+  if (!inchesA || !inchesB) {
+    if (weldResult) weldResult.innerHTML = `<p class="empty">Enter a thickness for both pieces — 1/16" to 1 1/2".</p>`;
+    schedulePills(false);
+    return;
+  }
+  const advice = adviseWeld({
+    process: state.weld.process,
+    metalA: state.weld.metalA,
+    metalB: state.weld.metalB,
+    thickA: inchesA,
+    thickB: inchesB,
+    joint: state.weld.joint,
+    position: state.weld.position,
+  });
+  const pair =
+    advice.metalA === advice.metalB
+      ? metalName(advice.metalA)
+      : `${metalName(advice.metalA)} to ${metalName(advice.metalB)}`;
+  if (weldResult) {
+    weldResult.innerHTML = advice.noWeld
+      ? `<p class="err">${escapeHtml(advice.filler)}</p>`
+      : `<div class="total">
+          <p class="equation">${escapeHtml(advice.processName)} · ${escapeHtml(advice.joint.label)} · ${escapeHtml(pair)}</p>
+          <div class="weld-stats">
+            ${advice.cards
+              .map(
+                (card) => `<div class="weld-stat"><span>${escapeHtml(card.label)}</span><strong>${escapeHtml(card.value)}</strong></div>`
+              )
+              .join("")}
+          </div>
+          ${advice.notes.map((note) => `<p class="weld-note">${escapeHtml(note)}</p>`).join("")}
+        </div>`;
+  }
+  schedulePills(false);
+}
+
+function syncWeldConverter(from) {
+  const src = from === "dec" ? weldDec : weldFrac;
+  const dst = from === "dec" ? weldFrac : weldDec;
+  if (!src || !dst) return;
+  const parsed = parseLength(src.value);
+  if (parsed.error || !Number.isFinite(parsed.inches) || parsed.inches < 0) {
+    if (from === "frac" && weldFracConv) weldFracConv.textContent = parsed.error || "";
+    if (from === "dec" && weldDecConv) weldDecConv.textContent = parsed.error || "";
+    return;
+  }
+  const inches = parsed.inches;
+  if (from === "frac") {
+    if (document.activeElement !== weldDec) weldDec.value = formatDecimal(inches, 4);
+    if (weldFracConv) weldFracConv.textContent = lengthConvLine(inches);
+    if (weldDecConv) weldDecConv.textContent = lengthConvLine(inches);
+  } else {
+    if (document.activeElement !== weldFrac) weldFrac.value = formatInchesFraction(inches, state.precision);
+    if (weldDecConv) weldDecConv.textContent = lengthConvLine(inches);
+    if (weldFracConv) weldFracConv.textContent = lengthConvLine(inches);
+  }
+}
+
 pipeStepsEl.addEventListener("input", (event) => {
   const straight = event.target.closest("[data-straight]");
   const jointLen = event.target.closest("[data-len]");
@@ -2016,6 +2255,57 @@ pipeStepsEl.addEventListener("input", (event) => {
   renderPipe(false);
 });
 
+function geomPairKey(from, to, path = "space") {
+  const a = from < to ? from : to;
+  const b = from < to ? to : from;
+  return `${a}|${b}|${path}`;
+}
+
+function pruneDistGeom(stations) {
+  const ids = new Set((stations || []).map((s) => s.id));
+  const next = (state.distGeom || []).filter((item) => ids.has(item.from) && ids.has(item.to) && item.from !== item.to);
+  if (next.length !== (state.distGeom || []).length) {
+    state.distGeom = next;
+    persist();
+  }
+}
+
+function hasDistGeom(from, to, path = "space") {
+  if (!from || !to || from === to) return false;
+  const key = geomPairKey(from, to, path);
+  return (state.distGeom || []).some((item) => geomPairKey(item.from, item.to, item.path || "space") === key);
+}
+
+function syncDistGeomButtons(from, to) {
+  const ready = Boolean(from && to && from !== to);
+  const on = ready && hasDistGeom(from, to, "space");
+  if (distGeomAdd) distGeomAdd.disabled = !ready || on;
+  if (distGeomDrop) distGeomDrop.disabled = !on;
+}
+
+function addDistGeom() {
+  const from = state.distFrom;
+  const to = state.distTo;
+  if (!from || !to || from === to || hasDistGeom(from, to, "space")) return;
+  state.distGeom = [...(state.distGeom || []), { from, to, path: "space" }];
+  persist();
+  haptic("success");
+  renderDistance();
+  renderPipe(false);
+}
+
+function dropDistGeom() {
+  const from = state.distFrom;
+  const to = state.distTo;
+  if (!hasDistGeom(from, to, "space")) return;
+  const key = geomPairKey(from, to, "space");
+  state.distGeom = (state.distGeom || []).filter((item) => geomPairKey(item.from, item.to, item.path || "space") !== key);
+  persist();
+  haptic("medium");
+  renderDistance();
+  renderPipe(false);
+}
+
 function defaultFitPair() {
   const stations = currentStations();
   const ids = stations.map((s) => s.id);
@@ -2034,12 +2324,18 @@ function seedFitRaw(from, to, path) {
 function activeFitSpans() {
   const seen = new Set();
   const fits = [];
-  for (const step of state.pipe.steps) {
-    if (!step.fit) continue;
-    const key = `${step.fit.from}|${step.fit.to}|${step.fit.path}`;
-    if (!step.fit.from || !step.fit.to || step.fit.from === step.fit.to || seen.has(key)) continue;
+  const push = (fit) => {
+    if (!fit?.from || !fit.to || fit.from === fit.to) return;
+    const key = geomPairKey(fit.from, fit.to, fit.path === "along" ? "along" : "space");
+    if (seen.has(key)) return;
     seen.add(key);
-    fits.push(step.fit);
+    fits.push(fit);
+  };
+  for (const step of state.pipe.steps) {
+    if (step.fit) push(step.fit);
+  }
+  for (const geom of state.distGeom || []) {
+    push({ from: geom.from, to: geom.to, path: geom.path === "along" ? "along" : "space", raw: "" });
   }
   return fits;
 }
@@ -2710,7 +3006,7 @@ async function setupPwa() {
     return;
   }
   try {
-    const reg = await navigator.serviceWorker.register("./sw.js?v=84");
+    const reg = await navigator.serviceWorker.register("./sw.js?v=88");
     const ready = await navigator.serviceWorker.ready;
     if (ready.active || reg.active) setInstallLabel("Ready");
     navigator.serviceWorker.addEventListener("message", (event) => {
