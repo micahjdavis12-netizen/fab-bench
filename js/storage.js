@@ -37,7 +37,36 @@ function sanitizeCalc(items) {
 }
 
 function sanitizeTab(tab) {
-  return tab === "combine" || tab === "pipe" || tab === "triangle" || tab === "distance" ? tab : "triangle";
+  return tab === "combine" || tab === "pipe" || tab === "triangle" || tab === "distance" || tab === "weld"
+    ? tab
+    : "triangle";
+}
+
+function sanitizeWeld(weld) {
+  const metals = new Set(["steel", "ss304", "ss316", "al6061"]);
+  const joints = new Set(["butt", "tjoint", "lap", "corner", "edge"]);
+  const positions = new Set(["flat", "vertical", "overhead"]);
+  const src = weld && typeof weld === "object" ? weld : {};
+  const mapMetal = (id) => {
+    if (id === "stainless") return "ss304";
+    if (id === "aluminum") return "al6061";
+    return metals.has(id) ? id : "steel";
+  };
+  const mapJoint = (id) => {
+    if (id === "fillet") return "tjoint";
+    if (id === "groove" || id === "pipe") return "butt";
+    return joints.has(id) ? id : "tjoint";
+  };
+  const process = src.process === "mig" || src.process === "stick" ? src.process : "tig";
+  return {
+    process,
+    metalA: mapMetal(src.metalA),
+    metalB: mapMetal(src.metalB),
+    thickA: String(src.thickA ?? "1/8").slice(0, 24),
+    thickB: String(src.thickB ?? "1/8").slice(0, 24),
+    joint: mapJoint(src.joint),
+    position: positions.has(src.position) ? src.position : "flat",
+  };
 }
 
 function sanitizeTheme(theme) {
@@ -51,6 +80,26 @@ function resolveTheme(saved) {
     return "dark";
   }
   return "light";
+}
+
+function sanitizeDistGeom(items) {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of items.slice(0, PIPE_STEP_LIMIT)) {
+    if (!item || typeof item !== "object") continue;
+    const from = String(item.from || "").slice(0, 8);
+    const to = String(item.to || "").slice(0, 8);
+    if (!from || !to || from === to) continue;
+    const path = item.path === "along" ? "along" : "space";
+    const a = from < to ? from : to;
+    const b = from < to ? to : from;
+    const key = `${a}|${b}|${path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ from, to, path });
+  }
+  return out;
 }
 
 function sanitizeFit(fit) {
@@ -140,6 +189,8 @@ export function loadState(makePipe) {
         distFrom: "",
         distTo: "",
         distFace: "center",
+        distGeom: [],
+        weld: sanitizeWeld(null),
         theme: resolveTheme(),
         lengthStyle: "fraction",
       };
@@ -160,6 +211,8 @@ export function loadState(makePipe) {
       distFrom: typeof data.distFrom === "string" ? data.distFrom : "",
       distTo: typeof data.distTo === "string" ? data.distTo : "",
       distFace: data.distFace === "inside" || data.distFace === "outside" ? data.distFace : "center",
+      distGeom: sanitizeDistGeom(data.distGeom),
+      weld: sanitizeWeld(data.weld),
       theme: resolveTheme(data.theme),
       lengthStyle: sanitizeLengthStyle(data.lengthStyle),
       pipe: { ...pipe, yaw: fallbackPipe.yaw, pitch: fallbackPipe.pitch },
@@ -173,6 +226,8 @@ export function loadState(makePipe) {
       distFrom: "",
       distTo: "",
       distFace: "center",
+      distGeom: [],
+      weld: sanitizeWeld(null),
       theme: resolveTheme(),
       lengthStyle: "fraction",
     };
@@ -193,6 +248,8 @@ export function saveState(partial, makePipe) {
       : current.distFace === "inside" || current.distFace === "outside"
         ? current.distFace
         : "center",
+    distGeom: sanitizeDistGeom(partial.distGeom ?? current.distGeom),
+    weld: sanitizeWeld(partial.weld ?? current.weld),
     theme: resolveTheme(partial.theme ?? current.theme),
     lengthStyle: sanitizeLengthStyle(partial.lengthStyle ?? current.lengthStyle),
     pipeVersion: 3,

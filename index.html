@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-title" content="Fab Bench" />
     <meta
       name="description"
-      content="Mobile-first triangle, pipe, and measurement calculator for fabrication and shop layout."
+      content="Mobile-first triangle, pipe, weld, and measurement calculator for fabrication and shop layout."
     />
     <title>Fab Bench</title>
     <script>
@@ -33,7 +33,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon-192.png" type="image/png" />
     <link rel="apple-touch-icon" href="./icons/icon-180.png" sizes="180x180" />
-      <link rel="stylesheet" href="./css/app.css?v=85" />
+      <link rel="stylesheet" href="./css/app.css?v=88" />
     <style>
       .saved {
         display: grid !important;
@@ -55,7 +55,7 @@
     </style>
     <script>
       (function () {
-        var build = "85";
+        var build = "88";
         var local = location.hostname === "127.0.0.1" || location.hostname === "localhost";
         var seen = localStorage.getItem("fab-bench-build") === build;
         if (seen && !local) return;
@@ -120,6 +120,7 @@
         <button class="tab" type="button" role="tab" id="tab-triangle" data-tab="triangle" aria-selected="true" aria-controls="view-triangle">Triangle</button>
         <button class="tab" type="button" role="tab" id="tab-pipe" data-tab="pipe" aria-selected="false" aria-controls="view-pipe">Pipe</button>
         <button class="tab" type="button" role="tab" id="tab-distance" data-tab="distance" aria-selected="false" aria-controls="view-distance">Distance</button>
+        <button class="tab" type="button" role="tab" id="tab-weld" data-tab="weld" aria-selected="false" aria-controls="view-weld">Weld</button>
       </div>
 
       <div class="view" id="view-triangle" role="tabpanel" aria-labelledby="tab-triangle">
@@ -359,6 +360,25 @@
             <button class="kind" type="button" data-face="inside" aria-pressed="false">Inside</button>
             <button class="kind" type="button" data-face="outside" aria-pressed="false">Outside</button>
           </div>
+          <div class="dock cage-dock dist-geom-dock">
+            <button class="glass float" type="button" id="dist-geom-add" aria-label="Add line">
+              <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="3.2" cy="8" r="1.35" />
+                <circle cx="12.8" cy="8" r="1.35" />
+                <path d="M5.1 8h5.8" stroke-dasharray="1.7 1.5" />
+              </svg>
+              Add line
+            </button>
+            <button class="glass float" type="button" id="dist-geom-drop" aria-label="Remove line">
+              <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="3.2" cy="8" r="1.35" />
+                <circle cx="12.8" cy="8" r="1.35" />
+                <path d="M5.1 8h5.8" stroke-dasharray="1.7 1.5" />
+                <path d="M6.6 5.8 9.4 10.2M9.4 5.8 6.6 10.2" />
+              </svg>
+              Remove line
+            </button>
+          </div>
           <div class="result" id="dist-result" aria-live="polite"></div>
         </section>
 
@@ -367,6 +387,94 @@
             <h2 id="dist-work-title">Work</h2>
           </div>
           <div id="dist-work"></div>
+        </section>
+      </div>
+
+      <div class="view" id="view-weld" role="tabpanel" aria-labelledby="tab-weld" hidden>
+        <p class="status-bar">Shop starting points. Dial in on scrap — this is not a WPS.</p>
+
+        <section class="panel" aria-labelledby="weld-setup-title">
+          <div class="panel-head">
+            <h2 id="weld-setup-title">Setup</h2>
+          </div>
+          <div class="kind-toggle weld-process" role="group" aria-label="Process">
+            <button class="kind" type="button" data-weld-process="tig" aria-pressed="true">TIG <small>GTAW</small></button>
+            <button class="kind" type="button" data-weld-process="mig" aria-pressed="false">MIG <small>GMAW</small></button>
+            <button class="kind" type="button" data-weld-process="stick" aria-pressed="false">Stick <small>SMAW</small></button>
+          </div>
+          <div class="weld-ab-row">
+            <span class="weld-ab" aria-hidden="true">A</span>
+            <label class="field">
+              Material A
+              <select id="weld-metal-a" aria-label="First metal"></select>
+            </label>
+            <label class="field">
+              Thickness A
+              <input id="weld-thick-a" autocomplete="off" inputmode="text" placeholder="1/8" />
+            </label>
+          </div>
+          <div class="weld-chips" id="weld-chips-a" role="group" aria-label="Thickness A shortcuts"></div>
+          <p class="conv" id="weld-thick-a-conv"></p>
+          <div class="weld-ab-row">
+            <span class="weld-ab" aria-hidden="true">B</span>
+            <label class="field">
+              Material B
+              <select id="weld-metal-b" aria-label="Second metal"></select>
+            </label>
+            <label class="field">
+              Thickness B
+              <input id="weld-thick-b" autocomplete="off" inputmode="text" placeholder="1/8" />
+            </label>
+          </div>
+          <div class="weld-chips" id="weld-chips-b" role="group" aria-label="Thickness B shortcuts"></div>
+          <p class="conv" id="weld-thick-b-conv"></p>
+          <button class="weld-match" id="weld-match" type="button">Match B to A</button>
+          <p class="weld-hint">Fractions or decimals: 3/32, 0.09375, 1 1/4. Gauge shortcuts use material-specific thickness.</p>
+        </section>
+
+        <section class="panel" aria-labelledby="weld-joint-title">
+          <div class="panel-head">
+            <h2 id="weld-joint-title">Joint &amp; position</h2>
+          </div>
+          <div class="weld-joints" id="weld-joints" role="group" aria-label="Weld type"></div>
+          <label class="field">
+            Welding position
+            <select id="weld-position" aria-label="Welding position"></select>
+          </label>
+        </section>
+
+        <section class="workspace weld-space" id="weld-workspace" aria-label="Weld joint">
+          <div class="weld-art-head">
+            <strong id="weld-art-title">T-joint</strong>
+            <span class="weld-badge" id="weld-art-kind">Fillet weld</span>
+          </div>
+          <div id="weld-art"></div>
+        </section>
+
+        <div class="result" id="weld-result" aria-live="polite"></div>
+
+        <section class="panel" aria-labelledby="weld-conv-title">
+          <div class="panel-head">
+            <h2 id="weld-conv-title">Inch converter</h2>
+          </div>
+          <div class="weld-pair">
+            <label class="field">
+              Fraction
+              <div class="unit-field">
+                <input id="weld-frac" autocomplete="off" inputmode="text" placeholder="3/16" />
+                <span class="unit">in</span>
+              </div>
+              <p class="conv" id="weld-frac-conv"></p>
+            </label>
+            <label class="field">
+              Decimal
+              <div class="unit-field">
+                <input id="weld-dec" autocomplete="off" inputmode="decimal" placeholder="0.188" />
+                <span class="unit">in</span>
+              </div>
+              <p class="conv" id="weld-dec-conv"></p>
+            </label>
+          </div>
         </section>
       </div>
     </div>
@@ -397,6 +505,6 @@
       </div>
     </dialog>
 
-    <script type="module" src="./js/app.js?v=85"></script>
+    <script type="module" src="./js/app.js?v=88"></script>
   </body>
 </html>
